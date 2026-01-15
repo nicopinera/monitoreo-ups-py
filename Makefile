@@ -17,6 +17,6 @@ run_hum:
 
 run_state:
 	@echo "Corriendo monitoreo de ups..."
-	cd src/state_ups
-	chmod +x main.py
+	cd ./src/state_ups/;\
+	chmod +x main.py;\
 	./main.py

@@ -1,3 +1,5 @@
+#!/usr/bin/python3 
+
 import constantes as const
 from easysnmp import Session, EasySNMPTimeoutError
 import sys
