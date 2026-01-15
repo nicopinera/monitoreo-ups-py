@@ -1,3 +1,14 @@
+instalacion_requisitos:
+	@echo "Instalando python3";\
+	sudo apt install python3 -y;\
+	
+	@echo "Instalando pip";\
+	sudo apt install python3-pip -y;\
+
+	@echo "Instalando easysnmp y snmp";\
+	sudo apt install snmp -y;\
+	sudo pip3 install easysnmp;\
+
 run_hum:
 	@echo "Corriendo monitoreo de humedad..."
 	cd src/humedad_ups
