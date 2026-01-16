@@ -6,9 +6,9 @@ import sys
 
 # Funcion principal
 def main():
-    sesion_ups = Session(hostname=const.HOST_NAME, community='public', version=2, timeout=5,retries=1)
+    sesion_ups = Session(hostname=const.HOST_NAME, community=const.COMMUNITY, version=2)
     try:
-        aux = sesion_ups.get(const.OIDH)
+        aux = sesion_ups.get(const.ODIH2)
         humedad = aux.value
         print(f"Humedad UPS: {humedad}%")
     except EasySNMPTimeoutError as error:
