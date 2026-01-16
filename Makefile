@@ -11,8 +11,8 @@ instalacion_requisitos:
 
 run_hum:
 	@echo "Corriendo monitoreo de humedad..."
-	cd src/humedad_ups
-	chmod +x main.py
+	cd src/humedad_ups ;\
+	chmod +x main.py;\
 	./main.py
 
 run_state:
