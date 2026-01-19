@@ -39,4 +39,4 @@ class UPS():
             sys.exit(0)
     
     def toString(self): # Texto en formato para Grafana
-        print(f"ups_temp,host={self.hostname} battery={self.temperatura_bateria},temp={self.temperatura_uio1},capacity={self.carga},load={self.load},life={self.tiempo_autonomia},current={self.corriente}")
+        print(f"ups_temp2,host={self.hostname} battery={self.temperatura_bateria},temp={self.temperatura_uio1},capacity={self.carga},load={self.load},life={self.tiempo_autonomia},current={self.corriente}")
