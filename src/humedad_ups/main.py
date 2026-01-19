@@ -6,7 +6,7 @@ import sys
 
 # Funcion principal
 def main():
-    sesion_ups = Session(hostname=const.HOST_NAME, community=const.COMMUNITY, version=2)
+    sesion_ups = Session(hostname=const.HOST_NAME, community=const.COMMUNITY, version=1)
     try:
         aux = sesion_ups.get(const.ODIH2)
         humedad = aux.value
