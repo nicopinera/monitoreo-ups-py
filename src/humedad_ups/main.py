@@ -10,7 +10,8 @@ def main():
     try:
         aux = sesion_ups.get(const.ODIH2)
         humedad = aux.value
-        print(f"Humedad UPS: {humedad}%")
+        ups = const.HOST_NAME.split(".")[0]
+        print(f"ups_temp,host={ups} humidity2={humedad}")
     except EasySNMPTimeoutError as error:
         # easysnmp.exceptions.EasySNMPTimeoutError: Excepcion de tiempo de espera al conectar con el host remoto.   
         print(f"Ocurrió un error inesperado: {error}. El programa terminará. ")
