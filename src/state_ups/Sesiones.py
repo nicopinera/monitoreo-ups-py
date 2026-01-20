@@ -22,6 +22,7 @@ class UPS():
         self.full_hostname = hostname+'.psi.unc.edu.ar' # Se genera el nombre de Host completo
         self.session = Session(hostname=self.full_hostname, community=const.COMMUNITY, version=1) # Sesion SNMP
         self.obtener_datos()
+        self.validar_datos()
     
     def obtener_datos(self):
         try:
