@@ -1,6 +1,7 @@
 #!/usr/bin/python3    
 
 import constantes as const
+import os
 from Sesiones import UPS
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
