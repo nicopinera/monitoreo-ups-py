@@ -43,23 +43,23 @@ class UPS():
             sys.exit(0)
     
     def validar_datos(self):
-        val,msg = validar_temp_bateria()
+        val,msg = validar_temp_bateria(self.hostname,self.temperatura_bateria)
         if(val==False):
             self.envio_mensaje(msg)
 
-        val,msg = validar_temp_uio()
+        val,msg = validar_temp_uio(self.hostname,self.temperatura_uio1)
         if(val==False):
             self.envio_mensaje(msg)
 
-        val,msg = validar_carga()
+        val,msg = validar_carga(self.hostname,self.carga)
         if(val==False):
             self.envio_mensaje(msg)
 
-        val,msg = vaildar_load()
+        val,msg = vaildar_load(self.hostname,self.load)
         if(val==False):
             self.envio_mensaje(msg)
         
-        val,msg = validar_tiempo_autonomia()
+        val,msg = validar_tiempo_autonomia(self.hostname,self.tiempo_autonomia)
         if(val==False):
             self.envio_mensaje(msg)
         
