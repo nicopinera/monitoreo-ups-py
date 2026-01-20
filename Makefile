@@ -7,7 +7,10 @@ instalacion_requisitos:
 
 	@echo "Instalando easysnmp y snmp";\
 	sudo apt install snmp -y;\
-	sudo pip3 install easysnmp;\
+	sudo apt install python3-easysnmp;\
+
+	@echo "Instalando dotenv";\
+	sudo apt install python3-dotenv;
 
 run_hum:
 	@echo "Corriendo monitoreo de humedad..."
