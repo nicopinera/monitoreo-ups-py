@@ -12,7 +12,7 @@ def main():
     url = os.getenv('PASSWORDCHAT')
     ups_list = []
     for host in const.HOST_NAME_SHORT:
-        ups = UPS(host)
+        ups = UPS(host,url)
         ups_list.append(ups)
     
     with ThreadPoolExecutor(max_workers=6) as executor:
