@@ -48,30 +48,29 @@ class UPS():
     
     def validar_datos(self):
         mensajes = []
-        val,msg = validar_temp_bateria(self.temperatura_bateria,self.hostname)
-        if(val==False):
+        val, msg = validar_temp_bateria(self.temperatura_bateria, self.hostname)
+        if not val and msg:
             mensajes.append(msg)
 
-        val,msg = validar_temp_uio(host=self.hostname,valor=self.temperatura_uio1)
-        if(val==False):
+        val, msg = validar_temp_uio(self.temperatura_uio1, self.hostname)
+        if not val and msg:
             mensajes.append(msg)
 
-        val,msg = validar_carga(host=self.hostname,valor=self.carga)
-        if(val==False):
+        val, msg = validar_carga(self.carga, self.hostname)
+        if not val and msg:
             mensajes.append(msg)
 
-        val,msg = vaildar_load(host=self.hostname,valor=self.load)
-        if(val==False):
+        val, msg = vaildar_load(self.load, self.hostname)
+        if not val and msg:
             mensajes.append(msg)
-        
-        val,msg = validar_tiempo_autonomia(host=self.hostname,valor=self.tiempo_autonomia)
-        if(val==False):
+
+        val, msg = validar_tiempo_autonomia(self.tiempo_autonomia, self.hostname)
+        if not val and msg:
             mensajes.append(msg)
-        
+
         if mensajes:
             mensaje_final = "\n".join(mensajes)
-            self.envio_mensaje(mensajes)
-        
+            self.envio_mensaje(mensaje_final)
 
     def envio_mensaje(self,msg):
         message_headers = {"Content-Type": "application/json; charset=UTF-8"}
