@@ -52,19 +52,19 @@ class UPS():
         if(val==False):
             mensajes.append(msg)
 
-        val,msg = validar_temp_uio(self.hostname,self.temperatura_uio1)
+        val,msg = validar_temp_uio(host=self.hostname,valor=self.temperatura_uio1)
         if(val==False):
             mensajes.append(msg)
 
-        val,msg = validar_carga(self.hostname,self.carga)
+        val,msg = validar_carga(host=self.hostname,valor=self.carga)
         if(val==False):
             mensajes.append(msg)
 
-        val,msg = vaildar_load(self.hostname,self.load)
+        val,msg = vaildar_load(host=self.hostname,valor=self.load)
         if(val==False):
             mensajes.append(msg)
         
-        val,msg = validar_tiempo_autonomia(self.hostname,self.tiempo_autonomia)
+        val,msg = validar_tiempo_autonomia(host=self.hostname,valor=self.tiempo_autonomia)
         if(val==False):
             mensajes.append(msg)
         
