@@ -1,6 +1,6 @@
 from easysnmp import Session, EasySNMPTimeoutError
 from Validar_datos import *
-from dotenv import load_dotenv
+
 from httplib2 import Http
 from json import dumps
 import constantes as const
@@ -9,6 +9,7 @@ import sys, os
 class UPS():
     hostname = '' # Nombre corto
     full_hostname = '' # Nombre completo para generar la sesion SNMP
+    url = ''
     session = None # Objeto Sesion
     temperatura_bateria = 0 # Temperatura Baterias
     temperatura_uio1 = 0 # Temperatura del sensor UIO
@@ -17,12 +18,14 @@ class UPS():
     tiempo_autonomia = 0 # Tiempo de autonomia 
     corriente = 0 # Corriente suministrada por el UPS
 
-    def __init__(self,hostname):
+    def __init__(self,hostname,url):
         self.hostname = hostname
         self.full_hostname = hostname+'.psi.unc.edu.ar' # Se genera el nombre de Host completo
+        self.url = url
         self.session = Session(hostname=self.full_hostname, community=const.COMMUNITY, version=1) # Sesion SNMP
         self.obtener_datos()
-        self.validar_datos()
+        self.toString()
+        #self.validar_datos()
     
     def obtener_datos(self):
         try:
@@ -66,12 +69,10 @@ class UPS():
         
 
     def envio_mensaje(self,msg):
-        load_dotenv()
-        url = os.getenv('PASSWORDCHAT')
         message_headers = {"Content-Type": "application/json; charset=UTF-8"}
         http_obj = Http()
         app_message = {"text": msg}
-        http_obj.request(uri=url, method="POST", headers=message_headers, body=dumps(app_message), )
+        http_obj.request(uri=self.url, method="POST", headers=message_headers, body=dumps(app_message), )
 
 
 
