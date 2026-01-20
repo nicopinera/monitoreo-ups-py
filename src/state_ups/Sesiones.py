@@ -44,7 +44,7 @@ class UPS():
             sys.exit(0)
     
     def validar_datos(self):
-        val,msg = validar_temp_bateria(self.hostname,self.temperatura_bateria)
+        val,msg = validar_temp_bateria(self.temperatura_bateria,self.hostname)
         if(val==False):
             self.envio_mensaje(msg)
 
