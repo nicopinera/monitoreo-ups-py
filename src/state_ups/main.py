@@ -17,7 +17,7 @@ def main():
     
     with ThreadPoolExecutor(max_workers=6) as executor:
         for ups in ups_list:
-            executor.submit(ups.validar_datos())
+            executor.submit(ups.validar_datos)
 
 if __name__ == "__main__":
     main()
