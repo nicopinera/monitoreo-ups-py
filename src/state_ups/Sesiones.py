@@ -1,6 +1,10 @@
 from easysnmp import Session, EasySNMPTimeoutError
+from Validar_datos import *
+from dotenv import load_dotenv
+from httplib2 import Http
+from json import dumps
 import constantes as const
-import sys
+import sys, os
 
 class UPS():
     hostname = '' # Nombre corto
@@ -38,5 +42,37 @@ class UPS():
             print(f"Ocurrió un error inesperado: {error2}. El programa terminará. ")
             sys.exit(0)
     
+    def validar_datos(self):
+        val,msg = validar_temp_bateria()
+        if(val==False):
+            self.envio_mensaje(msg)
+
+        val,msg = validar_temp_uio()
+        if(val==False):
+            self.envio_mensaje(msg)
+
+        val,msg = validar_carga()
+        if(val==False):
+            self.envio_mensaje(msg)
+
+        val,msg = vaildar_load()
+        if(val==False):
+            self.envio_mensaje(msg)
+        
+        val,msg = validar_tiempo_autonomia()
+        if(val==False):
+            self.envio_mensaje(msg)
+        
+
+    def envio_mensaje(self,msg):
+        load_dotenv()
+        url = os.getenv('PASSWORDCHAT')
+        message_headers = {"Content-Type": "application/json; charset=UTF-8"}
+        http_obj = Http()
+        app_message = {"text": msg}
+        http_obj.request(uri=url, method="POST", headers=message_headers, body=dumps(app_message), )
+
+
+
     def toString(self): # Texto en formato para Grafana
         print(f"ups_temp2,host={self.hostname} battery={self.temperatura_bateria},temp={self.temperatura_uio1},capacity={self.carga},load={self.load},life={self.tiempo_autonomia},current={self.corriente}")
