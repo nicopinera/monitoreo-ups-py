@@ -29,16 +29,16 @@ class UPS():
     
     def obtener_datos(self):
         try:
-            self.temperatura_bateria = int(self.session.get(const.OIDB).value)/1
-            self.carga = float(self.session.get(const.OIDCAPACITY).value)
-            self.load = float(self.session.get(const.OIDLOAD).value)
+            self.temperatura_bateria = int(self.session.get(const.OIDB).value)
+            self.carga = int(self.session.get(const.OIDCAPACITY).value)
+            self.load = int(self.session.get(const.OIDLOAD).value)
             tiempo_aux = round((int(self.session.get(const.OIDLIFE).value))/6000,2) # Calculo para obtener minutos
             self.tiempo_autonomia = tiempo_aux
-            self.corriente = float(self.session.get(const.OIDCURRENT).value)
+            self.corriente = int(self.session.get(const.OIDCURRENT).value)
             try:
-                self.temperatura_uio1 = float(self.session.get(const.OIDT).value)
+                self.temperatura_uio1 = int(self.session.get(const.OIDT).value)
             except:
-                self.temperatura_uio1 = float(self.session.get(const.OIDTNEW).value)   
+                self.temperatura_uio1 = int(self.session.get(const.OIDTNEW).value)   
         except EasySNMPTimeoutError as error:  
             print(f"Ocurrió un error inesperado: {error}. El programa terminará. ")
             sys.exit(0)
@@ -77,8 +77,6 @@ class UPS():
         http_obj = Http()
         app_message = {"text": msg}
         http_obj.request(uri=self.url, method="POST", headers=message_headers, body=dumps(app_message), )
-
-
 
     def toString(self): # Texto en formato para Grafana
         print(f"ups_temp2,host={self.hostname} battery={self.temperatura_bateria},temp={self.temperatura_uio1},capacity={self.carga},load={self.load},life={self.tiempo_autonomia},current={self.corriente}")
