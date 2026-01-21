@@ -29,7 +29,7 @@ class UPS():
     
     def obtener_datos(self):
         try:
-            self.temperatura_bateria = self.session.get(const.OIDB).value
+            self.temperatura_bateria = float(self.session.get(const.OIDB).value)
             self.carga = self.session.get(const.OIDCAPACITY).value
             self.load = self.session.get(const.OIDLOAD).value
             tiempo_aux = round((int(self.session.get(const.OIDLIFE).value))/6000,2) # Calculo para obtener minutos
