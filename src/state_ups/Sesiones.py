@@ -36,9 +36,9 @@ class UPS():
             self.tiempo_autonomia = tiempo_aux
             self.corriente = self.session.get(const.OIDCURRENT).value
             try:
-                self.temperatura_uio1 = self.session.get(const.OIDT).value
+                self.temperatura_uio1 = float(self.session.get(const.OIDT).value)
             except:
-                self.temperatura_uio1 = self.session.get(const.OIDTNEW).value   
+                self.temperatura_uio1 = float(self.session.get(const.OIDTNEW).value)   
         except EasySNMPTimeoutError as error:  
             print(f"Ocurrió un error inesperado: {error}. El programa terminará. ")
             sys.exit(0)
