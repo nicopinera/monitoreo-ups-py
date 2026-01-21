@@ -60,7 +60,7 @@ class UPS():
         if not val and msg:
             mensajes.append(msg)
 
-        val, msg = vaildar_load(self.load, self.hostname)
+        val, msg = validar_load(self.load, self.hostname)
         if not val and msg:
             mensajes.append(msg)
 
