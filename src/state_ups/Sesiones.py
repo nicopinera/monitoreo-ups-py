@@ -22,8 +22,24 @@ class UPS():
         self.hostname = hostname # Nombre corto
         self.full_hostname = hostname+'.psi.unc.edu.ar' # Nombre completo para generar la sesion SNMP
         self.url = url # URL del webhook para notificaciones
-        self.db = BaseDatos(db_file)
-        self.db.Crear_Base_datos()
+        db_dir = os.path.dirname(os.path.abspath(db_file))
+        if not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except Exception as e:
+                pass
+
+        # Verificar permisos de escritura
+        if not os.access(db_dir, os.W_OK):
+            print(f"[ERROR] No hay permisos de escritura en la carpeta de la base de datos: {db_dir}", file=sys.stderr)
+
+        try:
+            self.db = BaseDatos(db_file)
+            self.db.Crear_Base_datos()
+        except Exception as e:
+            print(f"[ERROR] Fallo al crear/conectar la base de datos: {db_file} ({e})", file=sys.stderr)
+            # Asignar una base de datos dummy para evitar bloqueos
+            self.db = None
         self.session = Session(hostname=self.full_hostname, community=const.COMMUNITY, version=1) # Sesion SNMP
         self.obtener_datos()
         self.toString()
@@ -42,10 +58,8 @@ class UPS():
                 self.temperatura_uio1 = self.session.get(const.OIDTNEW).value   
         except EasySNMPTimeoutError as error:  
             print(f"Ocurrió un error inesperado: {error}. El programa terminará. ")
-            sys.exit(0)
         except Exception as error2:
             print(f"Ocurrió un error inesperado: {error2}. El programa terminará. ")
-            sys.exit(0)
     
     def validar_datos(self):
         mensajes = []

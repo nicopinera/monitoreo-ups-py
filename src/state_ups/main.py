@@ -17,9 +17,10 @@ def borrar_si_vieja(db_path,minutos=10):
             edad = (time.time() - os.path.getmtime(db_path)) / 60
             if edad > minutos:
                 os.remove(db_path)
-                print(f"[INFO] Base de datos {db_path} eliminada por ser mayor a {minutos} minutos")
+                # print(f"[INFO] Base de datos {db_path} eliminada por ser mayor a {minutos} minutos")
         except Exception as e:
-            print(f"[WARNING] No se pudo borrar {db_path}: {e}")
+            pass
+            # print(f"[WARNING] No se pudo borrar {db_path}: {e}")
 
 # Funcion principal
 def main():
