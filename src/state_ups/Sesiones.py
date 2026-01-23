@@ -48,62 +48,68 @@ class UPS():
             sys.exit(0)
     
     def validar_datos(self):
-        # Array para almacenar los mensajes de errores generados
         mensajes = []
 
         # Validacion de temperatura de baterias
         error, msg = validar_temp_bateria(self.temperatura_bateria, self.hostname)
-        
-        # Si existe un error ...
         if error is not None:
-            if self.db.error_activo(self.hostname,error.name) is None:
-                self.db.agregar_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,"TEMPERATURA_BATERIA_ALTA") is not None:
-                self.db.resolver_error(self.hostname,"TEMPERATURA_BATERIA_ALTA")
-                msg = f"[RESUELTO - {self.hostname}] TEMPERATURA BATERIAS volvio a la normalidad"
+            if self.db.error_activo(self.hostname, "TEMPERATURA_BATERIA_ALTA") is not None:
+                self.db.resolver_error(self.hostname, "TEMPERATURA_BATERIA_ALTA")
+                mensajes.append(f"[RESUELTO - {self.hostname}] TEMPERATURA BATERIAS volvio a la normalidad")
 
+        # Validacion de temperatura UIO
         error, msg = validar_temp_uio(self.temperatura_uio1, self.hostname)
         if error is not None:
-            if self.db.error_activo(self.hostname,error.name) is None:
-                self.db.agregar_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,"UIO_ROTO") is not None or self.db.error_activo(self.hostname,"UIO_TEMPERATURA_ALTA") is not None:
-                self.db.resolver_error(self.hostname,"UIO_ROTO")
-                self.db.resolver_error(self.hostname,"UIO_TEMPERATURA_ALTA")
-                msg = f"[RESUELTO - {self.hostname}] TEMPERATURA AMBIENTE volvio a la normalidad"
+            uio_roto = self.db.error_activo(self.hostname, "UIO_ROTO")
+            uio_temp = self.db.error_activo(self.hostname, "UIO_TEMPERATURA_ALTA")
+            if uio_roto is not None or uio_temp is not None:
+                self.db.resolver_error(self.hostname, "UIO_ROTO")
+                self.db.resolver_error(self.hostname, "UIO_TEMPERATURA_ALTA")
+                mensajes.append(f"[RESUELTO - {self.hostname}] TEMPERATURA AMBIENTE volvio a la normalidad")
 
+        # Validacion de carga
         error, msg = validar_carga(self.carga, self.hostname)
         if error is not None:
-            if self.db.error_activo(self.hostname,error.name) is None:
-                self.db.agregar_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,"CARGA_MINIMA") is not None:
-                self.db.resolver_error(self.hostname,"CARGA_MINIMA")
-                msg = f"[RESUELTO - {self.hostname}] La CARGA volvio a la normalidad"
+            if self.db.error_activo(self.hostname, "CARGA_MINIMA") is not None:
+                self.db.resolver_error(self.hostname, "CARGA_MINIMA")
+                mensajes.append(f"[RESUELTO - {self.hostname}] La CARGA volvio a la normalidad")
 
+        # Validacion de load
         error, msg = validar_load(self.load, self.hostname)
         if error is not None:
-            if self.db.error_activo(self.hostname,error.name) is None:
-                self.db.agregar_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,"LOAD_MAXIMO") is not None:
-                self.db.resolver_error(self.hostname,"LOAD_MAXIMO")
-                msg = f"[RESUELTO - {self.hostname}] LOAD volvio a la normalidad"
+            if self.db.error_activo(self.hostname, "LOAD_MAXIMO") is not None:
+                self.db.resolver_error(self.hostname, "LOAD_MAXIMO")
+                mensajes.append(f"[RESUELTO - {self.hostname}] LOAD volvio a la normalidad")
 
+        # Validacion de tiempo de autonomia
         error, msg = validar_tiempo_autonomia(self.tiempo_autonomia, self.hostname)
         if error is not None:
-            if self.db.error_activo(self.hostname,error.name) is None:
-                self.db.agregar_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,"AUTONOMIA_MINIMO") is not None:
-                self.db.resolver_error(self.hostname,"AUTONOMIA_MINIMO")
-                msg = f"[RESUELTO - {self.hostname}] TIEMPO AUTONOMIA volvio a la normalidad"
+            if self.db.error_activo(self.hostname, "AUTONOMIA_MINIMO") is not None:
+                self.db.resolver_error(self.hostname, "AUTONOMIA_MINIMO")
+                mensajes.append(f"[RESUELTO - {self.hostname}] TIEMPO AUTONOMIA volvio a la normalidad")
+
+        # Siempre imprimir datos para Grafana
+        self.toString()
 
         if mensajes:
             mensaje_final = "\n".join(mensajes)
