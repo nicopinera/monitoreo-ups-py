@@ -38,8 +38,7 @@ class UPS():
             self.db.Crear_Base_datos()
         except Exception as e:
             print(f"[ERROR] Fallo al crear/conectar la base de datos: {db_file} ({e})", file=sys.stderr)
-            # Asignar una base de datos dummy para evitar bloqueos
-            self.db = None
+            self.db = None # Asignar una base de datos dummy para evitar bloqueos
         self.session = Session(hostname=self.full_hostname, community=const.COMMUNITY, version=1) # Sesion SNMP
         self.obtener_datos()
         self.toString()
@@ -66,7 +65,6 @@ class UPS():
 
         # Validacion de temperatura de baterias
         error, msg = validar_temp_bateria(self.temperatura_bateria, self.hostname)
-        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)
@@ -78,7 +76,6 @@ class UPS():
 
         # Validacion de temperatura UIO
         error, msg = validar_temp_uio(self.temperatura_uio1, self.hostname)
-        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)
@@ -93,7 +90,6 @@ class UPS():
 
         # Validacion de carga
         error, msg = validar_carga(self.carga, self.hostname)
-        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)
@@ -105,7 +101,6 @@ class UPS():
 
         # Validacion de load
         error, msg = validar_load(self.load, self.hostname)
-        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)
@@ -117,7 +112,6 @@ class UPS():
 
         # Validacion de tiempo de autonomia
         error, msg = validar_tiempo_autonomia(self.tiempo_autonomia, self.hostname)
-        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)
@@ -135,16 +129,7 @@ class UPS():
         message_headers = {"Content-Type": "application/json; charset=UTF-8"}
         http_obj = Http()
         app_message = {"text": msg}
-        #print(f"[DEBUG] Intentando enviar mensaje a Google Chat: {msg}")
-        #print(f"[DEBUG] Webhook URL: {self.url}")
-        try:
-            response, content = http_obj.request(
-                uri=self.url, method="POST", headers=message_headers, body=dumps(app_message)
-            )
-            #print(f"[DEBUG] Respuesta del webhook: {response.status} {content}")
-        except Exception as e:
-            pass
-            #print(f"[ERROR] Fallo al enviar mensaje a Google Chat: {e}", file=sys.stderr)
+        http_obj.request(uri=self.url, method="POST", headers=message_headers, body=dumps(app_message))
 
     def toString(self): # Texto en formato para Grafana
         print(f"ups_temp2,host={self.hostname} battery={self.temperatura_bateria},temp={self.temperatura_uio1},capacity={self.carga},load={self.load},life={self.tiempo_autonomia},current={self.corriente}")

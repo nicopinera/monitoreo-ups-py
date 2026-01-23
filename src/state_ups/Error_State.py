@@ -7,7 +7,3 @@ class Errores(Enum):
     CARGA_MINIMA = 4
     LOAD_MAXIMO = 5
     AUTONOMIA_MINIMO = 6
-
-class EstadoErrores(Enum):
-    ACTIVO = 1
-    RESUELTO = 2

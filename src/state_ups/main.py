@@ -17,17 +17,14 @@ def borrar_si_vieja(db_path,minutos=10):
             edad = (time.time() - os.path.getmtime(db_path)) / 60
             if edad > minutos:
                 os.remove(db_path)
-                # print(f"[INFO] Base de datos {db_path} eliminada por ser mayor a {minutos} minutos")
         except Exception as e:
-            pass
-            # print(f"[WARNING] No se pudo borrar {db_path}: {e}")
+            pass  # Si no se pudo conectar, asumir que está en uso y no borrar
 
 # Funcion principal
 def main():
     borrar_si_vieja(const.DIR_DB)
     load_dotenv("/etc/telegraf/monitoreo-ups/.env")
     url = os.getenv('PASSWORDCHAT')
-    #print(f"[DEBUG] PASSWORDCHAT cargado: {url}")
     
     ups_list = []
     for host in const.HOST_NAME_SHORT:
