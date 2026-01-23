@@ -25,7 +25,7 @@ def borrar_si_vieja(db_path,minutos=10):
 # Funcion principal
 def main():
     borrar_si_vieja(const.DIR_DB)
-    load_dotenv()
+    load_dotenv("/etc/telegraf/monitoreo-ups/.env")
     url = os.getenv('PASSWORDCHAT')
     
     ups_list = []

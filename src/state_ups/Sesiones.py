@@ -129,11 +129,19 @@ class UPS():
             mensaje_final = "\n".join(mensajes)
             self.envio_mensaje(mensaje_final)
 
-    def envio_mensaje(self,msg):
+    def envio_mensaje(self, msg):
         message_headers = {"Content-Type": "application/json; charset=UTF-8"}
         http_obj = Http()
         app_message = {"text": msg}
-        http_obj.request(uri=self.url, method="POST", headers=message_headers, body=dumps(app_message), )
+        print(f"[DEBUG] Intentando enviar mensaje a Google Chat: {msg}")
+        print(f"[DEBUG] Webhook URL: {self.url}")
+        try:
+            response, content = http_obj.request(
+                uri=self.url, method="POST", headers=message_headers, body=dumps(app_message)
+            )
+            print(f"[DEBUG] Respuesta del webhook: {response.status} {content}")
+        except Exception as e:
+            print(f"[ERROR] Fallo al enviar mensaje a Google Chat: {e}", file=sys.stderr)
 
     def toString(self): # Texto en formato para Grafana
         print(f"ups_temp2,host={self.hostname} battery={self.temperatura_bateria},temp={self.temperatura_uio1},capacity={self.carga},load={self.load},life={self.tiempo_autonomia},current={self.corriente}")
