@@ -1,82 +1,150 @@
 from easysnmp import Session, EasySNMPTimeoutError
 from Validar_datos import *
-
+from Base_Datos import BaseDatos
 from httplib2 import Http
 from json import dumps
 import constantes as const
 import sys, os
 
 class UPS():
-    hostname = '' # Nombre corto
-    full_hostname = '' # Nombre completo para generar la sesion SNMP
-    url = ''
-    session = None # Objeto Sesion
-    temperatura_bateria = 0 # Temperatura Baterias
-    temperatura_uio1 = 0 # Temperatura del sensor UIO
-    carga = 0 # Porcentaje de Carga
-    load = 0 # Carga a la salida
-    tiempo_autonomia = 0 # Tiempo de autonomia 
-    corriente = 0 # Corriente suministrada por el UPS
+    """
+    Docstring for UPS
+    Temperatura_baterias = Almacena la temperatura actual de las baterias
+    Temperatura_uio1 = Almacena la temperatura actual medida por el sensor de temperatura
+    Carga = Representa el % de carga de las baterias
+    Load = Representa el % de carga conectada al UPS
+    tiempo_autonomia = Representa el tiempo de autonomia en min del UPS
+    corriente = Representa la corriente suministrada por el UPS a los dispositivos conectados
+    """
+    temperatura_bateria, temperatura_uio1,carga,load,tiempo_autonomia,corriente = 0,0,0,0,0,0
 
-    def __init__(self,hostname,url):
-        self.hostname = hostname
-        self.full_hostname = hostname+'.psi.unc.edu.ar' # Se genera el nombre de Host completo
-        self.url = url
+    def __init__(self,hostname,url,db_file):
+        self.hostname = hostname # Nombre corto
+        self.full_hostname = hostname+'.psi.unc.edu.ar' # Nombre completo para generar la sesion SNMP
+        self.url = url # URL del webhook para notificaciones
+        db_dir = os.path.dirname(os.path.abspath(db_file))
+        if not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except Exception as e:
+                pass
+
+        # Verificar permisos de escritura
+        if not os.access(db_dir, os.W_OK):
+            print(f"[ERROR] No hay permisos de escritura en la carpeta de la base de datos: {db_dir}", file=sys.stderr)
+
+        try:
+            self.db = BaseDatos(db_file)
+            self.db.Crear_Base_datos()
+        except Exception as e:
+            print(f"[ERROR] Fallo al crear/conectar la base de datos: {db_file} ({e})", file=sys.stderr)
+            # Asignar una base de datos dummy para evitar bloqueos
+            self.db = None
         self.session = Session(hostname=self.full_hostname, community=const.COMMUNITY, version=1) # Sesion SNMP
         self.obtener_datos()
         self.toString()
-        #self.validar_datos()
     
     def obtener_datos(self):
         try:
-            self.temperatura_bateria = int(self.session.get(const.OIDB).value)
-            self.carga = int(self.session.get(const.OIDCAPACITY).value)
-            self.load = int(self.session.get(const.OIDLOAD).value)
+            self.temperatura_bateria = self.session.get(const.OIDB).value
+            self.carga = self.session.get(const.OIDCAPACITY).value
+            self.load = self.session.get(const.OIDLOAD).value
             tiempo_aux = round((int(self.session.get(const.OIDLIFE).value))/6000,2) # Calculo para obtener minutos
             self.tiempo_autonomia = tiempo_aux
-            self.corriente = int(self.session.get(const.OIDCURRENT).value)
+            self.corriente = self.session.get(const.OIDCURRENT).value
             try:
-                self.temperatura_uio1 = int(self.session.get(const.OIDT).value)
+                self.temperatura_uio1 = self.session.get(const.OIDT).value
             except:
-                self.temperatura_uio1 = int(self.session.get(const.OIDTNEW).value)   
+                self.temperatura_uio1 = self.session.get(const.OIDTNEW).value   
         except EasySNMPTimeoutError as error:  
             print(f"Ocurrió un error inesperado: {error}. El programa terminará. ")
-            sys.exit(0)
         except Exception as error2:
             print(f"Ocurrió un error inesperado: {error2}. El programa terminará. ")
-            sys.exit(0)
     
     def validar_datos(self):
         mensajes = []
-        val, msg = validar_temp_bateria(self.temperatura_bateria, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
 
-        val, msg = validar_temp_uio(self.temperatura_uio1, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
+        # Validacion de temperatura de baterias
+        error, msg = validar_temp_bateria(self.temperatura_bateria, self.hostname)
+        #print(msg)
+        if error is not None:
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
+                mensajes.append(msg)
+        else:
+            if self.db.error_activo(self.hostname, "TEMPERATURA_BATERIA_ALTA") is not None:
+                self.db.resolver_error(self.hostname, "TEMPERATURA_BATERIA_ALTA")
+                mensajes.append(f"[RESUELTO - {self.hostname}] TEMPERATURA BATERIAS volvio a la normalidad")
 
-        val, msg = validar_carga(self.carga, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
+        # Validacion de temperatura UIO
+        error, msg = validar_temp_uio(self.temperatura_uio1, self.hostname)
+        #print(msg)
+        if error is not None:
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
+                mensajes.append(msg)
+        else:
+            uio_roto = self.db.error_activo(self.hostname, "UIO_ROTO")
+            uio_temp = self.db.error_activo(self.hostname, "UIO_TEMPERATURA_ALTA")
+            if uio_roto is not None or uio_temp is not None:
+                self.db.resolver_error(self.hostname, "UIO_ROTO")
+                self.db.resolver_error(self.hostname, "UIO_TEMPERATURA_ALTA")
+                mensajes.append(f"[RESUELTO - {self.hostname}] TEMPERATURA AMBIENTE volvio a la normalidad")
 
-        val, msg = validar_load(self.load, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
+        # Validacion de carga
+        error, msg = validar_carga(self.carga, self.hostname)
+        #print(msg)
+        if error is not None:
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
+                mensajes.append(msg)
+        else:
+            if self.db.error_activo(self.hostname, "CARGA_MINIMA") is not None:
+                self.db.resolver_error(self.hostname, "CARGA_MINIMA")
+                mensajes.append(f"[RESUELTO - {self.hostname}] La CARGA volvio a la normalidad")
 
-        val, msg = validar_tiempo_autonomia(self.tiempo_autonomia, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
+        # Validacion de load
+        error, msg = validar_load(self.load, self.hostname)
+        #print(msg)
+        if error is not None:
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
+                mensajes.append(msg)
+        else:
+            if self.db.error_activo(self.hostname, "LOAD_MAXIMO") is not None:
+                self.db.resolver_error(self.hostname, "LOAD_MAXIMO")
+                mensajes.append(f"[RESUELTO - {self.hostname}] LOAD volvio a la normalidad")
+
+        # Validacion de tiempo de autonomia
+        error, msg = validar_tiempo_autonomia(self.tiempo_autonomia, self.hostname)
+        #print(msg)
+        if error is not None:
+            if self.db.error_activo(self.hostname, error.name) is None:
+                self.db.agregar_error(self.hostname, error.name)
+                mensajes.append(msg)
+        else:
+            if self.db.error_activo(self.hostname, "AUTONOMIA_MINIMO") is not None:
+                self.db.resolver_error(self.hostname, "AUTONOMIA_MINIMO")
+                mensajes.append(f"[RESUELTO - {self.hostname}] TIEMPO AUTONOMIA volvio a la normalidad")
 
         if mensajes:
             mensaje_final = "\n".join(mensajes)
             self.envio_mensaje(mensaje_final)
 
-    def envio_mensaje(self,msg):
+    def envio_mensaje(self, msg):
         message_headers = {"Content-Type": "application/json; charset=UTF-8"}
         http_obj = Http()
         app_message = {"text": msg}
-        http_obj.request(uri=self.url, method="POST", headers=message_headers, body=dumps(app_message), )
+        #print(f"[DEBUG] Intentando enviar mensaje a Google Chat: {msg}")
+        #print(f"[DEBUG] Webhook URL: {self.url}")
+        try:
+            response, content = http_obj.request(
+                uri=self.url, method="POST", headers=message_headers, body=dumps(app_message)
+            )
+            #print(f"[DEBUG] Respuesta del webhook: {response.status} {content}")
+        except Exception as e:
+            pass
+            #print(f"[ERROR] Fallo al enviar mensaje a Google Chat: {e}", file=sys.stderr)
 
     def toString(self): # Texto en formato para Grafana
         print(f"ups_temp2,host={self.hostname} battery={self.temperatura_bateria},temp={self.temperatura_uio1},capacity={self.carga},load={self.load},life={self.tiempo_autonomia},current={self.corriente}")
