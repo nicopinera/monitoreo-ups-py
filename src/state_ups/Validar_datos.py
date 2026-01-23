@@ -11,7 +11,8 @@ def validar_temp_bateria(valor,host):
     """
     error = None
     msg = ""
-    if (int(valor) >= c.VALOR_TEMP_BAT_MAX):
+    aux = float(valor)
+    if (aux > c.VALOR_TEMP_BAT_MAX):
         error = Errores.TEMPERATURA_BATERIA_ALTA
         msg = f"[ADVERTENCIA - {host}] Temperatura de bateria mayor a {c.VALOR_TEMP_BAT_MAX} °C : Valor actual {valor} °C. Tomar acciones pertinentes"
     return error,msg
@@ -26,10 +27,11 @@ def validar_temp_uio(valor,host):
     """
     error = None
     msg = ""
-    if int(valor) < 0:
+    aux = float(valor)
+    if aux < 0:
         error = Errores.UIO_ROTO
         msg = f"[ADVERTENCIA - {host}] Sensor de Temperatura Roto - REEMPLAZAR"
-    elif int(valor) >= c.VALOR_TEMP_UIO_MAX:
+    elif aux > c.VALOR_TEMP_UIO_MAX:
         error = Errores.UIO_TEMPERATURA_ALTA
         msg = f"[ADVERTENCIA - {host}] Temperatura Ambiental alta - Valor actual {valor} °C"
     return error,msg
@@ -44,7 +46,8 @@ def validar_carga(valor,host):
     """
     error = None
     msg = ""
-    if int(valor) <= c.VALOR_CARGA_MIN:
+    aux = float(valor)
+    if aux < c.VALOR_CARGA_MIN:
         error = Errores.CARGA_MINIMA
         msg = f"[ADVERTENCIA - {host}] Carga de bateria baja - Valor actual {valor} %"
     return error,msg
@@ -59,7 +62,8 @@ def validar_load(valor,host):
     """
     error = None
     msg = ""
-    if int(valor) >= c.VALOR_LOAD_MAX:
+    aux = float(valor)
+    if aux > c.VALOR_LOAD_MAX:
         error = Errores.LOAD_MAXIMO
         msg = f"[ADVERTENCIA - {host}] Carga a la salida alta - Valor actual {valor} %"
     return error,msg
@@ -74,7 +78,8 @@ def validar_tiempo_autonomia(valor,host):
     """
     error = None
     msg = ""
-    if float(valor) <= c.VALOR_AUTONOMIA_MIN:
+    aux = float(valor)
+    if aux < c.VALOR_AUTONOMIA_MIN:
         error = Errores.AUTONOMIA_MINIMO
         msg = f"[ADVERTENCIA - {host}] Tiempo de autonomia bajo - Valor actual {valor} min"
     return error,msg
