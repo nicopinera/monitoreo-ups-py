@@ -14,8 +14,8 @@ class BaseDatos():
         La misma almacenara un id autoincremental del error, el host del ups, el tipo de error, el estado del mismo
         y una fecha que se genera con la fecha y hora actual.
         """
+        self.conn = sqlite3.connect(self.db_file)
         if not os.path.exists(self.db_file):
-            self.conn = sqlite3.connect(self.db_file)
             cursor = self.conn.cursor()
             cursor.execute("""
                            CREATE TABLE errores(
