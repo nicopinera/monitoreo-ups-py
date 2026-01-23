@@ -75,8 +75,73 @@ state_ups/
 ├── constantes.py (Configuración, OIDs y umbrales)
 ├── main.py (Orquestador principal)
 ├── Sesiones.py (Clase UPS - Lógica POO)
-└── Validar_datos.py (Funciones de validación)
+├── Validar_datos.py (Funciones de validación)
+├── Base_Datos.py (Gestión de SQLite - Almacenamiento de errores)
+└── Error_State.py (Enum de tipos de errores)
 ```
+
+---
+
+### **Error_State.py** - Enum de tipos de errores
+
+Define una enumeración con todos los tipos de errores posibles que puede generar un UPS:
+
+```python
+class Errores(Enum):
+    TEMPERATURA_BATERIA_ALTA = 1    # Temperatura de batería excede umbral
+    UIO_ROTO = 2                    # Sensor de temperatura ambiental desconectado
+    UIO_TEMPERATURA_ALTA = 3        # Temperatura ambiente excede umbral
+    CARGA_MINIMA = 4                # Carga de batería por debajo del umbral
+    LOAD_MAXIMO = 5                 # Carga a la salida excede umbral
+    AUTONOMIA_MINIMO = 6            # Tiempo de autonomía por debajo del umbral
+```
+
+Esta enumeración es utilizada por las funciones de validación y por la base de datos para mantener un registro consistente de los tipos de errores.
+
+---
+
+### **Base_Datos.py** - Gestión de SQLite
+
+Implementa la clase `BaseDatos` para almacenar y gestionar el historial de errores en una base de datos SQLite. Permite evitar el reenvío duplicado de alertas y detectar cuando los errores se resuelven.
+
+#### Estructura de la tabla `errores`
+
+```sql
+CREATE TABLE errores(
+    id INTEGER PRIMARY KEY,
+    ups_host TEXT NOT NULL,
+    tipo_error TEXT NOT NULL,
+    estado_error TEXT NOT NULL CHECK (estado_error IN ('activo', 'resuelto')),
+    fecha TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+#### Métodos principales
+
+**1. `Crear_Base_datos()` - Inicialización**
+
+- Crea la base de datos si no existe
+- Inicializa la tabla `errores` con campos para ID, host, tipo de error, estado y timestamp
+
+**2. `error_activo(ups_host, tipo_error)` - Consulta errores activos**
+
+- Busca si existe un error activo específico para un UPS
+- Retorna el registro si existe, `None` si no
+
+**3. `error_resuelto(ups_host, tipo_error)` - Consulta errores resueltos**
+
+- Busca si existe un registro resuelto para un determinado error
+- Útil para verificar si un problema fue notificado anteriormente
+
+**4. `agregar_error(ups_host, tipo_error)` - Registra nuevo error**
+
+- Inserta un nuevo error con estado `'activo'` y timestamp actual
+- Se llama cuando se detecta un error que no estaba registrado
+
+**5. `resolver_error(ups_host, tipo_error)` - Resuelve errores**
+
+- Cambia el estado de un error a `'resuelto'` y actualiza el timestamp
+- Se llama cuando un error monitoreado vuelve a la normalidad
 
 ---
 
@@ -89,6 +154,7 @@ hostname             # Nombre corto del UPS (ej: f1r2u1)
 full_hostname        # HOSTNAME completo (ej: f1r2u1.psi.unc.edu.ar)
 url                  # URL webhook para envío de alertas
 session              # Objeto sesión SNMP
+db                   # Instancia de BaseDatos para gestión de errores
 temperatura_bateria  # Temperatura de la batería (°C)
 temperatura_uio1     # Temperatura del sensor ambiental UIO (°C)
 carga                # Porcentaje de carga de batería (%)
@@ -99,11 +165,12 @@ corriente            # Corriente suministrada por el UPS (Amperios)
 
 #### Métodos de la clase
 
-**1. `__init__(hostname, url)` - Constructor**
+**1. `__init__(hostname, url, db_file)` - Constructor**
 
 - Inicializa el hostname corto del UPS
 - Construye el HOSTNAME completando con el dominio `.psi.unc.edu.ar`
 - Almacena la URL del webhook para notificaciones
+- **Crea instancia de `BaseDatos`** con el path especificado
 - Crea la sesión SNMP usando la comunidad definida en constantes
 - Llama automáticamente a `obtener_datos()` para recolectar métricas
 - Imprime el estado actual en formato Grafana mediante `toString()`
@@ -124,20 +191,42 @@ Manejo de excepciones:
 - Excepciones genéricas: Otros errores SNMP
 - Termina el programa al encontrar error
 
-**3. `validar_datos()` - Validación de límites**
+**3. `validar_datos()` - Validación inteligente de límites con persistencia**
 
-- Invoca 5 funciones de validación independientes
-- Cada función retorna una tupla `(válido, mensaje)`
-- Recolecta todos los mensajes de alerta en una lista
-- Si hay alertas, construye un mensaje final con todas ellas (separadas por `\n`)
-- Envía el mensaje consolidado vía `envio_mensaje()`
+Implementa un sistema de detección de errores con memoria que evita reenvío duplicado:
+
+1. **Para cada validación**:
+   - Invoca la función de validación correspondiente
+   - Obtiene: `(error: Errores | None, mensaje: str)`
+
+2. **Si se detecta un error** (`error is not None`):
+   - **Consulta la BD**: ¿Existe este error activo para este UPS?
+   - **Si NO existe**:
+     - Registra el error en la BD con estado `'activo'`
+     - Agrega el mensaje a la lista de notificaciones
+   - **Si ya existe**:
+     - NO genera mensaje (evita duplicados)
+     - El error ya fue notificado en iteraciones anteriores
+
+3. **Si NO hay error** (métrica dentro de rango normal):
+   - **Consulta la BD**: ¿Existe registro de este error (activo o resuelto)?
+   - **Si existe error activo**:
+     - Marca el error como `'resuelto'` en la BD
+     - Agrega mensaje de resolución: `[RESUELTO - host] métrica volvió a la normalidad`
+   - **Si no existe o ya está resuelto**:
+     - No genera mensaje (no hay cambio de estado)
+
+4. **Envío de mensajes consolidados**:
+   - Acumula todos los mensajes (alertas nuevas + resoluciones)
+   - Si hay mensajes: los envía unidos por `\n` vía webhook
+   - Si no hay cambios: no envía nada
 
 **4. `envio_mensaje(msg)` - Notificación HTTP**
 
 - Prepara headers HTTP con tipo `application/json`
 - Crea objeto JSON: `{"text": "mensaje de alerta"}`
 - Realiza POST request a la URL del webhook
-- Permite notificaciones en plataformas como Slack, Teams, etc.
+- Permite notificaciones en plataformas como Slack, Teams, Google Chat, etc.
 
 **5. `toString()` - Formato de salida Grafana**
 Imprime todas las métricas en formato InfluxDB compatible:
@@ -186,96 +275,37 @@ HOST_NAME_SHORT     # Lista combinada
 
 ### **Validar_datos.py** - Funciones de validación
 
-Cada función realiza una validación específica y retorna `(válido: bool, mensaje: str)`
+Cada función realiza una validación específica de una métrica del UPS y retorna una tupla `(error: Errores | None, mensaje: str)`.
 
----
+Cada función también genera un mensaje de alerta descriptivo con el valor actual de la métrica.
 
 ### **main.py** - Orquestador Principal
 
 #### Flujo de ejecución
 
-1. Carga variables de entorno usando `dotenv` (cargar `PASSWORDCHAT` con URL webhook)
-2. Inicializa lista vacía `ups_list` para almacenar objetos UPS
-3. **Itera** sobre la lista de UPS definida en constantes:
-   - Crea un objeto `UPS(host, url)` para cada equipo
+1. **Limpieza de base de datos antigua**:
+   - Función `borrar_si_vieja()` elimina la BD si tiene más de 10 minutos sin uso
+   - Evita acumulación de archivos de BD innecesarios
+
+2. Carga variables de entorno usando `dotenv` (cargar `PASSWORDCHAT` con URL webhook)
+
+3. Inicializa lista vacía `ups_list` para almacenar objetos UPS
+
+4. **Itera** sobre la lista de UPS definida en constantes:
+   - Crea un objeto `UPS(host, url, db_file)` para cada equipo
+   - Pasa la ruta de la BD centralizada (`const.DIR_DB`) a cada UPS
    - Agrega el objeto a la lista
-4. Crea un `ThreadPoolExecutor` con máximo 6 workers (6 hilos simultáneos)
-5. Para cada objeto UPS en la lista:
+
+5. Crea un `ThreadPoolExecutor` con máximo 6 workers (6 hilos simultáneos)
+
+6. Para cada objeto UPS en la lista:
    - Envía `ups.validar_datos` al executor para ejecución paralela
-6. El executor ejecuta validaciones de múltiples UPS concurrentemente
-7. Cada UPS que tenga alertas las envía automáticamente vía webhook
 
-#### Ventajas del enfoque concurrente
+7. El executor ejecuta validaciones de múltiples UPS concurrentemente
 
-- **Paralelismo**: 6 UPS se monitorean simultáneamente
-- **Eficiencia**: Tiempo total = tiempo de 1 UPS × (24/6) = 4 ciclos en lugar de 24
-- **No bloqueante**: Si un UPS tiene timeout, otros continúan
+8. Cada UPS que tenga alertas nuevas o resoluciones las envía automáticamente vía webhook
 
 ---
-
-## 📈 Flujo General del Sistema
-
-### Módulo humedad_ups (Simple - Procedural)
-
-```markdown
-Inicio
-  ↓
-Crear sesión SNMP
-  ↓
-Leer OID de humedad
-  ↓
-Imprimir valor (formato Grafana)
-  ↓
-Fin
-```
-
-### Módulo state_ups (Complejo - OOP + Concurrencia)
-
-```markdown
-Inicio
-  ↓
-Cargar URL webhook desde .env
-  ↓
-Para cada UPS (en paralelo - máx 6 simultáneos):
-  ├─ Instanciar objeto UPS
-  ├─ Constructor llama a obtener_datos()
-  │   ├─ Conexión SNMP
-  │   └─ Lectura 6 OIDs
-  ├─ Imprime valores en formato Grafana
-  ├─ Llama a validar_datos()
-  │   ├─ Ejecuta 5 funciones de validación
-  │   └─ Si hay alertas: envía JSON vía HTTP POST
-  └─ Fin del objeto UPS
-  ↓
-Fin del executor (espera todos los threads)
-```
-
----
-
-## 🎯 Diseño Orientado a Objetos en state_ups
-
-### Principios aplicados
-
-✅ **Encapsulación**: Cada UPS es un objeto independiente con sus propios datos y métodos. Los atributos privados mantienen la integridad de la información.
-
-✅ **Reutilización**: La clase `UPS` se instancia 24 veces sin repetir lógica. Un mismo patrón válido para cualquier número de equipos.
-
-✅ **Escalabilidad**: Agregar nuevos UPS solo requiere modificar listas en `constantes.py`. La clase se adapta automáticamente.
-
-✅ **Separación de responsabilidades**:
-
-- `Sesiones.py`: Gestión del UPS y su comunicación SNMP
-- `Validar_datos.py`: Lógica de validación independiente
-- `constantes.py`: Configuración centralizada
-- `main.py`: Orquestación y concurrencia
-
-✅ **Concurrencia eficiente**: ThreadPoolExecutor permite monitorear múltiples UPS en paralelo sin bloqueos.
-
-✅ **Mantenibilidad**: Cambios en validaciones solo afectan `Validar_datos.py`. Cambios en OIDs solo afectan `constantes.py`.
-
----
-
-## 🔧 Requisitos del Sistema
 
 ### Dependencias de Python
 
