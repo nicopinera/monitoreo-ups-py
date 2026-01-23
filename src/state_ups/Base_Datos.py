@@ -1,6 +1,5 @@
 import sqlite3, os
 import constantes as c
-conn = sqlite3.connect(c.DIR_DB)
 
 class BaseDatos():
     def __init__(self,db_file):
@@ -50,7 +49,7 @@ class BaseDatos():
         self.desconectar_DB()
         return resultado
 
-    def error_resuelt(self,ups_host,tipo_error):
+    def error_resuelto(self,ups_host,tipo_error):
         # Busca si el error de un determinado host ya fue resuelto
         self.conectar_DB()
         cursor = self.conn.cursor()
