@@ -60,8 +60,8 @@ class UPS():
                 self.db.agregar_error(self.hostname,error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,error.name) is not None:
-                self.db.resolver_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname,"TEMPERATURA_BATERIA_ALTA") is not None:
+                self.db.resolver_error(self.hostname,"TEMPERATURA_BATERIA_ALTA")
                 msg = f"[RESUELTO - {self.hostname}] TEMPERATURA BATERIAS volvio a la normalidad"
 
         error, msg = validar_temp_uio(self.temperatura_uio1, self.hostname)
@@ -70,8 +70,9 @@ class UPS():
                 self.db.agregar_error(self.hostname,error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,error.name) is not None:
-                self.db.resolver_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname,"UIO_ROTO") is not None or self.db.error_activo(self.hostname,"UIO_TEMPERATURA_ALTA") is not None:
+                self.db.resolver_error(self.hostname,"UIO_ROTO")
+                self.db.resolver_error(self.hostname,"UIO_TEMPERATURA_ALTA")
                 msg = f"[RESUELTO - {self.hostname}] TEMPERATURA AMBIENTE volvio a la normalidad"
 
         error, msg = validar_carga(self.carga, self.hostname)
@@ -80,8 +81,8 @@ class UPS():
                 self.db.agregar_error(self.hostname,error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,error.name) is not None:
-                self.db.resolver_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname,"CARGA_MINIMA") is not None:
+                self.db.resolver_error(self.hostname,"CARGA_MINIMA")
                 msg = f"[RESUELTO - {self.hostname}] La CARGA volvio a la normalidad"
 
         error, msg = validar_load(self.load, self.hostname)
@@ -90,8 +91,8 @@ class UPS():
                 self.db.agregar_error(self.hostname,error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,error.name) is not None:
-                self.db.resolver_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname,"LOAD_MAXIMO") is not None:
+                self.db.resolver_error(self.hostname,"LOAD_MAXIMO")
                 msg = f"[RESUELTO - {self.hostname}] LOAD volvio a la normalidad"
 
         error, msg = validar_tiempo_autonomia(self.tiempo_autonomia, self.hostname)
@@ -100,8 +101,8 @@ class UPS():
                 self.db.agregar_error(self.hostname,error.name)
                 mensajes.append(msg)
         else:
-            if self.db.error_activo(self.hostname,error.name) is not None:
-                self.db.resolver_error(self.hostname,error.name)
+            if self.db.error_activo(self.hostname,"AUTONOMIA_MINIMO") is not None:
+                self.db.resolver_error(self.hostname,"AUTONOMIA_MINIMO")
                 msg = f"[RESUELTO - {self.hostname}] TIEMPO AUTONOMIA volvio a la normalidad"
 
         if mensajes:
