@@ -27,7 +27,7 @@ def main():
     borrar_si_vieja(const.DIR_DB)
     load_dotenv("/etc/telegraf/monitoreo-ups/.env")
     url = os.getenv('PASSWORDCHAT')
-    print(f"[DEBUG] PASSWORDCHAT cargado: {url}")
+    #print(f"[DEBUG] PASSWORDCHAT cargado: {url}")
     
     ups_list = []
     for host in const.HOST_NAME_SHORT:
