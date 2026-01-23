@@ -29,7 +29,7 @@ OIDLIFE="1.3.6.1.4.1.318.1.1.1.2.2.3.0"
 # Corriente de salida en Ampers
 OIDCURRENT="1.3.6.1.4.1.318.1.1.1.4.2.4.0"
 
-DIR_DB = "src/state_ups/errores.db"
+DIR_DB = "errores.db"
 
 VALOR_TEMP_BAT_MAX = 23
 VALOR_TEMP_UIO_MAX = 23
