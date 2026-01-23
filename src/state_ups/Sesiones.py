@@ -1,31 +1,32 @@
 from easysnmp import Session, EasySNMPTimeoutError
 from Validar_datos import *
-
+from Base_Datos import BaseDatos
 from httplib2 import Http
 from json import dumps
 import constantes as const
 import sys, os
 
 class UPS():
-    hostname = '' # Nombre corto
-    full_hostname = '' # Nombre completo para generar la sesion SNMP
-    url = ''
-    session = None # Objeto Sesion
-    temperatura_bateria = 0 # Temperatura Baterias
-    temperatura_uio1 = 0 # Temperatura del sensor UIO
-    carga = 0 # Porcentaje de Carga
-    load = 0 # Carga a la salida
-    tiempo_autonomia = 0 # Tiempo de autonomia 
-    corriente = 0 # Corriente suministrada por el UPS
+    """
+    Docstring for UPS
+    Temperatura_baterias = Almacena la temperatura actual de las baterias
+    Temperatura_uio1 = Almacena la temperatura actual medida por el sensor de temperatura
+    Carga = Representa el % de carga de las baterias
+    Load = Representa el % de carga conectada al UPS
+    tiempo_autonomia = Representa el tiempo de autonomia en min del UPS
+    corriente = Representa la corriente suministrada por el UPS a los dispositivos conectados
+    """
+    temperatura_bateria, temperatura_uio1,carga,load,tiempo_autonomia,corriente = 0,0,0,0,0,0
 
-    def __init__(self,hostname,url):
-        self.hostname = hostname
-        self.full_hostname = hostname+'.psi.unc.edu.ar' # Se genera el nombre de Host completo
-        self.url = url
+    def __init__(self,hostname,url,db_file):
+        self.hostname = hostname # Nombre corto
+        self.full_hostname = hostname+'.psi.unc.edu.ar' # Nombre completo para generar la sesion SNMP
+        self.url = url # URL del webhook para notificaciones
+        self.db = BaseDatos(db_file)
+        self.db.Crear_Base_datos()
         self.session = Session(hostname=self.full_hostname, community=const.COMMUNITY, version=1) # Sesion SNMP
         self.obtener_datos()
         self.toString()
-        #self.validar_datos()
     
     def obtener_datos(self):
         try:
@@ -47,26 +48,61 @@ class UPS():
             sys.exit(0)
     
     def validar_datos(self):
+        # Array para almacenar los mensajes de errores generados
         mensajes = []
-        val, msg = validar_temp_bateria(self.temperatura_bateria, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
 
-        val, msg = validar_temp_uio(self.temperatura_uio1, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
+        # Validacion de temperatura de baterias
+        error, msg = validar_temp_bateria(self.temperatura_bateria, self.hostname)
+        
+        # Si existe un error ...
+        if error is not None:
+            if self.db.error_activo(self.hostname,error.name) is None:
+                self.db.agregar_error(self.hostname,error.name)
+                mensajes.append(msg)
+        else:
+            if self.db.error_activo(self.hostname,error.name) is not None:
+                self.db.resolver_error(self.hostname,error.name)
+                msg = f"[RESUELTO - {self.hostname}] TEMPERATURA BATERIAS volvio a la normalidad"
 
-        val, msg = validar_carga(self.carga, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
+        error, msg = validar_temp_uio(self.temperatura_uio1, self.hostname)
+        if error is not None:
+            if self.db.error_activo(self.hostname,error.name) is None:
+                self.db.agregar_error(self.hostname,error.name)
+                mensajes.append(msg)
+        else:
+            if self.db.error_activo(self.hostname,error.name) is not None:
+                self.db.resolver_error(self.hostname,error.name)
+                msg = f"[RESUELTO - {self.hostname}] TEMPERATURA AMBIENTE volvio a la normalidad"
 
-        val, msg = validar_load(self.load, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
+        error, msg = validar_carga(self.carga, self.hostname)
+        if error is not None:
+            if self.db.error_activo(self.hostname,error.name) is None:
+                self.db.agregar_error(self.hostname,error.name)
+                mensajes.append(msg)
+        else:
+            if self.db.error_activo(self.hostname,error.name) is not None:
+                self.db.resolver_error(self.hostname,error.name)
+                msg = f"[RESUELTO - {self.hostname}] La CARGA volvio a la normalidad"
 
-        val, msg = validar_tiempo_autonomia(self.tiempo_autonomia, self.hostname)
-        if not val and msg:
-            mensajes.append(msg)
+        error, msg = validar_load(self.load, self.hostname)
+        if error is not None:
+            if self.db.error_activo(self.hostname,error.name) is None:
+                self.db.agregar_error(self.hostname,error.name)
+                mensajes.append(msg)
+        else:
+            if self.db.error_activo(self.hostname,error.name) is not None:
+                self.db.resolver_error(self.hostname,error.name)
+                msg = f"[RESUELTO - {self.hostname}] LOAD volvio a la normalidad"
+
+        error, msg = validar_tiempo_autonomia(self.tiempo_autonomia, self.hostname)
+        if error is not None:
+            if self.db.error_activo(self.hostname,error.name) is None:
+                self.db.agregar_error(self.hostname,error.name)
+                mensajes.append(msg)
+        else:
+            if self.db.error_activo(self.hostname,error.name) is not None:
+                self.db.resolver_error(self.hostname,error.name)
+                msg = f"[RESUELTO - {self.hostname}] TIEMPO AUTONOMIA volvio a la normalidad"
 
         if mensajes:
             mensaje_final = "\n".join(mensajes)
