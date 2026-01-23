@@ -66,7 +66,7 @@ class UPS():
 
         # Validacion de temperatura de baterias
         error, msg = validar_temp_bateria(self.temperatura_bateria, self.hostname)
-        print(msg)
+        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)
@@ -78,7 +78,7 @@ class UPS():
 
         # Validacion de temperatura UIO
         error, msg = validar_temp_uio(self.temperatura_uio1, self.hostname)
-        print(msg)
+        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)
@@ -93,7 +93,7 @@ class UPS():
 
         # Validacion de carga
         error, msg = validar_carga(self.carga, self.hostname)
-        print(msg)
+        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)
@@ -105,7 +105,7 @@ class UPS():
 
         # Validacion de load
         error, msg = validar_load(self.load, self.hostname)
-        print(msg)
+        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)
@@ -117,7 +117,7 @@ class UPS():
 
         # Validacion de tiempo de autonomia
         error, msg = validar_tiempo_autonomia(self.tiempo_autonomia, self.hostname)
-        print(msg)
+        #print(msg)
         if error is not None:
             if self.db.error_activo(self.hostname, error.name) is None:
                 self.db.agregar_error(self.hostname, error.name)

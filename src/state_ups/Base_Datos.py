@@ -15,19 +15,18 @@ class BaseDatos():
         y una fecha que se genera con la fecha y hora actual.
         """
         self.conn = sqlite3.connect(self.db_file)
-        if not os.path.exists(self.db_file):
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                           CREATE TABLE errores(
-                           id INTEGER PRIMARY KEY,
-                           ups_host TEXT NOT NULL,
-                           tipo_error TEXT NOT NULL,
-                           estado_error TEXT NOT NULL CHECK (estado_error IN ('activo', 'resuelto')),
-                           fecha TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                           )
-            """)
-        self.conn.commit() # Confirmar cambios
-        self.conn.close() # Cerrar coneccion
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS errores(
+            id INTEGER PRIMARY KEY,
+            ups_host TEXT NOT NULL,
+            tipo_error TEXT NOT NULL,
+            estado_error TEXT NOT NULL CHECK (estado_error IN ('activo', 'resuelto')),
+            fecha TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        self.conn.commit()
+        self.conn.close()
     
     def conectar_DB(self):
         self.conn = sqlite3.connect(self.db_file)
