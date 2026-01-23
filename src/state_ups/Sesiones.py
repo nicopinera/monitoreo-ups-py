@@ -30,16 +30,16 @@ class UPS():
     
     def obtener_datos(self):
         try:
-            self.temperatura_bateria = int(self.session.get(const.OIDB).value)
-            self.carga = int(self.session.get(const.OIDCAPACITY).value)
-            self.load = int(self.session.get(const.OIDLOAD).value)
+            self.temperatura_bateria = self.session.get(const.OIDB).value
+            self.carga = self.session.get(const.OIDCAPACITY).value
+            self.load = self.session.get(const.OIDLOAD).value
             tiempo_aux = round((int(self.session.get(const.OIDLIFE).value))/6000,2) # Calculo para obtener minutos
             self.tiempo_autonomia = tiempo_aux
-            self.corriente = int(self.session.get(const.OIDCURRENT).value)
+            self.corriente = self.session.get(const.OIDCURRENT).value
             try:
-                self.temperatura_uio1 = int(self.session.get(const.OIDT).value)
+                self.temperatura_uio1 = self.session.get(const.OIDT).value
             except:
-                self.temperatura_uio1 = int(self.session.get(const.OIDTNEW).value)   
+                self.temperatura_uio1 = self.session.get(const.OIDTNEW).value   
         except EasySNMPTimeoutError as error:  
             print(f"Ocurrió un error inesperado: {error}. El programa terminará. ")
             sys.exit(0)
