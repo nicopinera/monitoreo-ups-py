@@ -22,10 +22,12 @@ class UPS():
         self.hostname = hostname # Nombre corto
         self.full_hostname = hostname+'.psi.unc.edu.ar' # Nombre completo para generar la sesion SNMP
         self.url = url # URL del webhook para notificaciones
+        
         db_dir = os.path.dirname(os.path.abspath(db_file))
         if not os.path.exists(db_dir):
             try:
                 os.makedirs(db_dir, exist_ok=True)
+                os.chmod(db_dir, 0o777)  # Da permisos de lectura, escritura y ejecución a todos
             except Exception as e:
                 pass
 
@@ -34,8 +36,8 @@ class UPS():
             print(f"[ERROR] No hay permisos de escritura en la carpeta de la base de datos: {db_dir}", file=sys.stderr)
 
         try:
-            self.db = BaseDatos(db_file)
-            self.db.Crear_Base_datos()
+            self.db = BaseDatos(db_file) # Se genera la instancia de la Base de datos
+            self.db.Crear_Base_datos() # Se crean las tablas de la base de datos
         except Exception as e:
             print(f"[ERROR] Fallo al crear/conectar la base de datos: {db_file} ({e})", file=sys.stderr)
             self.db = None # Asignar una base de datos dummy para evitar bloqueos
