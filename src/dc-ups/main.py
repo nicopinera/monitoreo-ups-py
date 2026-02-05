@@ -1,6 +1,7 @@
 #!/usr/bin/python3 
 
 import constantes as const
+from operaciones import *
 from easysnmp import Session, EasySNMPTimeoutError
 import sys
 
@@ -17,6 +18,9 @@ def obtener_datos(sesion_snmp):
         "voltaje_an":const.OID_V_AN,
         "voltaje_bn":const.OID_V_BN,
         "voltaje_cn":const.OID_V_CN,
+        "voltaje_out_an": const.OID_V_OUT_AN,
+        "voltaje_out_bn": const.OID_V_OUT_BN,
+        "voltaje_out_cn": const.OID_V_OUT_CN
     }
     datos = {}
     for nombre,oid in oid.items():
@@ -24,7 +28,7 @@ def obtener_datos(sesion_snmp):
         if nombre == "autonomia":
             datos[nombre] = round(int(aux.value)/60,2)
         else:
-            datos[nombre] = aux.value
+            datos[nombre] = int(aux.value)
     return datos
 
 # Funcion principal
@@ -37,11 +41,15 @@ def main():
         print(f"dc-ups,host={ups} carga_bat={datos['carga_bat']}")
         print(f"dc-ups,host={ups} bat_temp={datos['bat_temp']}")
         print(f"dc-ups,host={ups} carga_out={datos['carga_out']}")
-        print(f"dc-ups,host={ups} corriente_out_f1={datos['corriente_out_f1']},corriente_out_f2={datos['corriente_out_f2']},corriente_out_f3={datos['corriente_out_f3']}")
-        print(f"dc-ups,host={ups} voltaje_out={datos['voltaje_out']}")
-        print(f"dc-ups,host={ups} voltaje_an={datos['voltaje_an']},voltaje_bn={datos['voltaje_bn']},voltaje_cn={datos['voltaje_cn']}")
-    except EasySNMPTimeoutError as error:
-        # easysnmp.exceptions.EasySNMPTimeoutError: Excepcion de tiempo de espera al conectar con el host remoto.   
+        aux_corriente = int(datos['corriente_out_f1']) + int(datos['corriente_out_f2']) + int(datos["corriente_out_f3"])
+        prom_corriente = round(aux_corriente/3,2)
+        print(f"dc-ups,host={ups} corriente_out_f1={datos['corriente_out_f1']},corriente_out_f2={datos['corriente_out_f2']},corriente_out_f3={datos['corriente_out_f3']},corriente_prom={prom_corriente}")
+        print(f"dc-ups,host={ups} voltaje_out={datos['voltaje_out']},voltaje_out_an={datos['voltaje_out_an']},voltaje_out_bn={datos['voltaje_out_bn']},voltaje_out_cn={datos['voltaje_out_cn']}")
+        print(f"dc-ups,host={ups} voltaje_an_input={datos['voltaje_an']},voltaje_bn_input={datos['voltaje_bn']},voltaje_cn_input={datos['voltaje_cn']}")
+        potencia = calculo_pot(datos)
+        print(f"dc-ups,host={ups} potencia_va_out_a={potencia[0]},potencia_va_out_b={potencia[1]},potencia_va_out_c={potencia[2]},potencia_va_out={potencia[3]},potencia_w_out={potencia[4]}")
+
+    except EasySNMPTimeoutError as error:  
         print(f"Ocurrió un error inesperado: {error}. El programa terminará. ")
         sys.exit(0)
     except Exception as error2:
