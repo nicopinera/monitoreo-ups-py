@@ -12,8 +12,11 @@ instalacion_requisitos:
 	@echo "Instalando dotenv";\
 	sudo apt install python3-dotenv;
 
-	@echo "Instalando httplib2"
-	sudo apt install python3-httplib2
+	@echo "Instalando httplib2";\
+	sudo apt install python3-httplib2;\
+
+	@echo "Instalando pytest" ;\
+	sudo apt install python3-pytest
 
 run_hum:
 	@echo "Corriendo monitoreo de humedad..."
