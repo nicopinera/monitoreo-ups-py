@@ -8,6 +8,9 @@ stages:
 # Configuración del Job de pruebas
 run_tests:
   stage: test
+  rules:
+    # Esta regla indica que el job solo se cree si el evento es un Merge Request
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   before_script:
     - make install_dependencias_ci
   script:
