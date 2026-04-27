@@ -1,0 +1,14 @@
+# Definimos la imagen de Docker con Python
+image: python:3.9
+
+# Definimos las etapas
+stages:
+  - test
+
+# Configuración del Job de pruebas
+run_tests:
+  stage: test
+  before_script:
+    - make instalacion_requisitos
+  script:
+    - pytest  # Ejecuta los tests
