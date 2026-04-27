@@ -9,6 +9,6 @@ stages:
 run_tests:
   stage: test
   before_script:
-    - make instalacion_requisitos
+    - make install_dependencias_ci
   script:
     - pytest  # Ejecuta los tests

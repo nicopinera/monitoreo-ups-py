@@ -29,3 +29,6 @@ run_state:
 	cd ./src/state_ups/;\
 	chmod +x main.py;\
 	./main.py
+
+install_dependencias_ci:
+	pip install pytest
