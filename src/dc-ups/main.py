@@ -22,11 +22,13 @@ def obtener_datos(sesion_snmp):
         "voltaje_out_bn": const.OID_V_OUT_BN,
         "voltaje_out_cn": const.OID_V_OUT_CN
     }
+
+    # DICCIONARIO DE DATOS ESTILO JSON CON LA ESTRUCTURA DE ARRIBA 
     datos = {}
     for nombre,oid in oid.items():
         aux = sesion_snmp.get(oid)
         if nombre == "autonomia":
-            datos[nombre] = round(int(aux.value)/60,2)
+            datos[nombre] = round(int(aux.value)/60,2)      #Pasas los segundos a minutos
         else:
             datos[nombre] = int(aux.value)
     return datos
@@ -36,7 +38,7 @@ def main():
     sesion_ups = Session(hostname=const.HOST_NAME, community=const.COMMUNITY, version=1)
     try:
         datos = obtener_datos(sesion_ups)
-        ups = const.HOST_NAME.split(".")[0]
+        ups = const.HOST_NAME.split(".")[0]                 #BUscalo
         print(f"dc-ups,host={ups} autonomia={datos['autonomia']}")
         print(f"dc-ups,host={ups} carga_bat={datos['carga_bat']}")
         print(f"dc-ups,host={ups} bat_temp={datos['bat_temp']}")

@@ -23,8 +23,8 @@ def borrar_si_vieja(db_path,minutos=10):
 # Funcion principal
 def main():
     borrar_si_vieja(const.DIR_DB)
-    load_dotenv("/etc/telegraf/monitoreo-ups/.env")
-    url = os.getenv('PASSWORDCHAT')
+    load_dotenv("/etc/telegraf/monitoreo-ups/.env")    #Buscar que hace
+    url = os.getenv('PASSWORDCHAT')                     #esto tambien
     
     ups_list = []
     for host in const.HOST_NAME_SHORT:
