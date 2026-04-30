@@ -65,6 +65,8 @@ VALOR_AUTONOMIA_MIN = 9.0
 
 RUTA_RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 ARCHIVO_ENV = os.path.join(RUTA_RAIZ,'.env')
+ARCHIVO_DB = os.path.join(RUTA_RAIZ,'data','errores.db')
+ARCHIVO_CREACION_TABLA_STATE = os.path.join(RUTA_RAIZ,'data','creacion_tabla_state.sql')
 VAR_PASSWORDCHAT = 'PASSWORDCHAT'
 
 
