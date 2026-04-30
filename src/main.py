@@ -29,7 +29,7 @@ def main():
     driver_state = []
     for host,client in zip(c.HOST_NAME_STATE,cliente_snmp_state):
         aux_drive_state = StateUPS(hostname=host,clienteSNMP=client,notificador=notificador,rep_db=repo_db)
-        driver_state.append(aux_client)
+        driver_state.append(aux_drive_state)
     
     dc_driver = DataCenterUPS(c.HOST_NAME_DC,clienteSNMP=cliente_snmp_dc)
     
@@ -37,6 +37,10 @@ def main():
     
     humedad_driver.ejecutar(c.OID_HUMEDAD)
     dc_driver.ejecutar()
+    
+    # Obtener e imprimir datos de los UPS
+    for d in driver_state:
+        d.ejecutar(c.OIDB,c.OIDCAPACITY,c.OIDLOAD,c.OIDLIFE,c.OIDCURRENT,c.OIDT,c.OIDTNEW)
 
 if __name__== "__main__":
     main()
