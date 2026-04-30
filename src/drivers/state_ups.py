@@ -36,8 +36,6 @@ class StateUPS(BaseUPS):
         """Cada driver imprime su formato para grafana/telegraf"""
         print(f"ups_temp2,host={self.hostname} battery={self.datos["battery"]},temp={self.datos["temp"]},capacity={self.datos["capacity"]},load={self.datos["load"]},life={self.datos["life"]},current={self.datos["current"]}")   
     
-    def ejecutar(self):
-        self.obtener_datos()
+    def ejecutar(self,oidbateria,oidcapacidad,oidload,oidlife,oidcorriente,oidtemp,oidtemp2):
+        self.obtener_datos(oidbateria,oidcapacidad,oidload,oidlife,oidcorriente,oidtemp,oidtemp2)
         self.imprimir_telegraf()
-        if self.notificador and self.rep_db:
-            self.validar_datos_y_notificar()
