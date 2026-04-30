@@ -25,7 +25,8 @@ class BaseDatos():
             fecha TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        self.conn.commit()
+        self.conn.commit()              # Esto es vital, es el boton de 'GUARDAR'. si haces un insert o update pero no llamo al commit, los cambios se perderan cuando cierre la conexion.
+    
         self.conn.close()
     
     def conectar_DB(self):
@@ -40,13 +41,15 @@ class BaseDatos():
         # Busca errores activos especificos de un UPS y devuelve algo distinto de None si encontro, 
         # si no encontro ningun error devuelve None
         self.conectar_DB()
-        cursor = self.conn.cursor()
+        cursor = self.conn.cursor()           
         cursor.execute(
             "SELECT * FROM errores WHERE ups_host=? AND tipo_error=? AND estado_error='activo'",(ups_host,tipo_error)
         )
         resultado = cursor.fetchone() # Si encuentra algo devuelve algo distinto de None
         self.desconectar_DB()
         return resultado
+            # Si error_activo devuelve None, significa que este error es NUEVO, entonces mandame una alerta y reguistro.
+            # Pero si ya existe un error activo, no hagas nada (ya se sabe)
 
     def error_resuelto(self,ups_host,tipo_error):
         # Busca si el error de un determinado host ya fue resuelto

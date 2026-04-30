@@ -18,7 +18,7 @@ class UPS():
     """
     temperatura_bateria, temperatura_uio1,carga,load,tiempo_autonomia,corriente = 0,0,0,0,0,0
 
-    def __init__(self,hostname,url,db_file):
+    def __init__(self,hostname,url,db_file):     ##QUE ES DB_FILE !!!!!!!!!!!!
         self.hostname = hostname # Nombre corto
         self.full_hostname = hostname+'.psi.unc.edu.ar' # Nombre completo para generar la sesion SNMP
         self.url = url # URL del webhook para notificaciones
@@ -53,6 +53,7 @@ class UPS():
             tiempo_aux = round((int(self.session.get(const.OIDLIFE).value))/6000,2) # Calculo para obtener minutos
             self.tiempo_autonomia = tiempo_aux
             self.corriente = self.session.get(const.OIDCURRENT).value
+            
             try:
                 self.temperatura_uio1 = self.session.get(const.OIDT).value
             except:
