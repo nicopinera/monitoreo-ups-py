@@ -54,8 +54,7 @@ OIDCURRENT="1.3.6.1.4.1.318.1.1.1.4.2.4.0"
 
 DIR_DB = "/var/lib/telegraf/errores.db"
 
-OIDH = "PowerNet-MIB::uioSensorStatusHumidity.2.1"
-ODIH2 = '1.3.6.1.4.1.318.1.1.25.1.2.1.7.2.1'
+OID_HUMEDAD = '1.3.6.1.4.1.318.1.1.25.1.2.1.7.2.1'
 
 VALOR_TEMP_BAT_MAX = 28
 VALOR_TEMP_UIO_MAX = 28

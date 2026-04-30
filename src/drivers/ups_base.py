@@ -23,9 +23,6 @@ class BaseUPS(ABC):
         """Cada driver imprime su formato para grafana/telegraf"""
         pass
     
+    @abstractmethod
     def ejecutar(self):
-        """Este metodo que se llama en main"""
-        self.obtener_datos()
-        self.imprimir_telegraf()
-        if self.notificador and self.rep_db:
-            self.validar_datos_y_notificar()
+        pass

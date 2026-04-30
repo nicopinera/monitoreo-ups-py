@@ -15,3 +15,9 @@ class StateUPS(BaseUPS):
     def imprimir_telegraf(self):
         """Cada driver imprime su formato para grafana/telegraf"""
         pass    
+    
+    def ejecutar(self):
+        self.obtener_datos()
+        self.imprimir_telegraf()
+        if self.notificador and self.rep_db:
+            self.validar_datos_y_notificar()

@@ -2,6 +2,9 @@ import config.configuracion as c
 from core.notificador import Notificador
 from core.snmp_client import ClienteSNMP
 from core.database import RepositorioDB
+from drivers.state_ups import StateUPS
+from drivers.dc_ups import DataCenterUPS
+from drivers.hum_ups import HumedadUPS
 
 def main():
     
@@ -24,8 +27,16 @@ def main():
     repo_db = RepositorioDB(c.ARCHIVO_DB)
     
     driver_state = []
+    for host,client in zip(c.HOST_NAME_STATE,cliente_snmp_state):
+        aux_drive_state = StateUPS(hostname=host,clienteSNMP=client,notificador=notificador,rep_db=repo_db)
+        driver_state.append(aux_client)
     
-    print("Hola mundo")
+    dc_driver = DataCenterUPS(c.HOST_NAME_DC,clienteSNMP=cliente_snmp_dc)
+    
+    humedad_driver = HumedadUPS(hostname=c.HOST_NAME_HUMEDAD,clienteSNMP=cliente_snmp_humedad)
+    
+    humedad_driver.ejecutar(c.OID_HUMEDAD)
+    dc_driver.ejecutar()
 
 if __name__== "__main__":
     main()

@@ -14,4 +14,7 @@ class DataCenterUPS(BaseUPS):
 
     def imprimir_telegraf(self):
         """Cada driver imprime su formato para grafana/telegraf"""
-        pass   
+        pass
+    
+    def ejecutar(self):
+        return super().ejecutar()
