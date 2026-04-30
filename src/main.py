@@ -1,6 +1,7 @@
 import config.configuracion as c
 from core.notificador import Notificador
 from core.snmp_client import ClienteSNMP
+from core.database import RepositorioDB
 
 def main():
     
@@ -18,6 +19,11 @@ def main():
     
     # Notificador
     notificador = Notificador(c.ARCHIVO_ENV)
+    
+    # Repositorio de base de datos
+    repo_db = RepositorioDB(c.ARCHIVO_DB)
+    
+    driver_state = []
     
     print("Hola mundo")
 
