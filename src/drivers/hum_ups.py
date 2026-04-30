@@ -11,11 +11,13 @@ class HumedadUPS(BaseUPS):
     
     def validar_datos_y_notificar(self):
         """Cada driver tiene sus propia logica para validar y generar las alertas"""
-        pass
+        if self.datos["humidity"] == None:
+            self.datos["humidity"] = 0
 
     def imprimir_telegraf(self):
         print(f"ups_temp2,host={self.hostname} humidity={self.datos["humidity"]}")
     
     def ejecutar(self,oid_hum):
         self.obtener_datos(oid_hum)
+        self.validar_datos_y_notificar()
         self.imprimir_telegraf()

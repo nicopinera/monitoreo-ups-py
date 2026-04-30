@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+"""Interfaz de UPS"""
 class BaseUPS(ABC):
     def __init__(self,hostname,clienteSNMP,notificador=None,rep_db=None):
         self.hostname = hostname
