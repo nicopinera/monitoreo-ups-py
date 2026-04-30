@@ -8,9 +8,12 @@ HOST_NAME_SHORT_F1 = ['f1r2u1','f1r3u1','f1r7u1','f1r9u1','f1r10u2','f1r11u1','f
 HOST_NAME_SHORT_F2 = ['f2r1u1','f2r1u2','f2r2u1','f2r2u2','f2r3u1','f2r3u2','f2r4u1','f2r4u2','f2r7u1','f2r7u2','f2r9u2','f2r10u1','f2r10u2','f2r11u1','f2r11u2'] # ,'f2r9u1'
 HOST_NAME_SHORT_F3 = ['f3r11u1','f3r11u2']
 
-HOST_NAME_SHORT = HOST_NAME_SHORT_F1 + HOST_NAME_SHORT_F2 + HOST_NAME_SHORT_F3
+HOST_NAME_STATE = HOST_NAME_SHORT_F1 + HOST_NAME_SHORT_F2 + HOST_NAME_SHORT_F3
 
-HOST_NAME = "f2r7u1.psi.unc.edu.ar"
+HOST_NAME_HUMEDAD = "f2r7u1"
+HOST_NAME_DC = "ups-dc"
+COMMUNITY = "publicapc"
+
 
 SUFIJO = '.psi.unc.edu.ar'
 
