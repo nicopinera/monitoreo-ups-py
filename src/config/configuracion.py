@@ -1,3 +1,5 @@
+import os
+
 COMMUNITY = "publicapc"
 COMMUNITY = "publicapc"
 COMMUNITY = 'publicapc'
@@ -10,6 +12,9 @@ HOST_NAME_SHORT = HOST_NAME_SHORT_F1 + HOST_NAME_SHORT_F2 + HOST_NAME_SHORT_F3
 
 HOST_NAME = "f2r7u1.psi.unc.edu.ar"
 
+SUFIJO = '.psi.unc.edu.ar'
+
+VERSION_SNMP = 1
 
 FP_OUT = 0.95
 
@@ -60,5 +65,8 @@ VALOR_CARGA_MIN = 70
 VALOR_LOAD_MAX = 45
 VALOR_AUTONOMIA_MIN = 9.0
 
+RUTA_RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+ARCHIVO_ENV = os.path.join(RUTA_RAIZ,'.env')
+VAR_PASSWORDCHAT = 'PASSWORDCHAT'
 
 
