@@ -4,23 +4,17 @@ class StateUPS(BaseUPS):
     def __init__(self, hostname, clienteSNMP, notificador=None, rep_db=None):
         super().__init__(hostname, clienteSNMP, notificador, rep_db)
     
-    def obtener_datos(self, oidbateria,oidcapacidad,oidload,oidlife,oidcorriente,oidtemp,oidtemp2):
+    def obtener_datos(self, oid_dicc,oidtemp,oidtemp2):
         """Cada driver debe saber que OID pedir"""
         # Temperatura bateria
-        self.datos["battery"] = self.clienteSNMP.obtener_valor(oidbateria)
         
-        # Capacidad bateria
-        self.datos["capacity"] = self.clienteSNMP.obtener_valor(oidcapacidad)
-        
-        # Carga a la salida
-        self.datos["load"] = self.clienteSNMP.obtener_valor(oidload)
-        
-        # autonomia
-        t_aux = round((int(self.clienteSNMP.obtener_valor(oidlife)))/6000,2)
-        self.datos["life"] = t_aux
-        
-        # Corriente salida
-        self.datos["current"] = self.clienteSNMP.obtener_valor(oidcorriente)
+        for nombre,oid in oid_dicc.items():
+            dato_aux = self.clienteSNMP.obtener_valor(oid)
+            if dato_aux:
+                if nombre == 'life':
+                    self.datos[nombre] = round((int(dato_aux))/6000,2)
+                else:
+                    self.datos[nombre] = dato_aux
         
         # I/O sensor de temperatura
         try:
@@ -34,8 +28,9 @@ class StateUPS(BaseUPS):
 
     def imprimir_telegraf(self):
         """Cada driver imprime su formato para grafana/telegraf"""
-        print(f"ups_temp2,host={self.hostname} battery={self.datos["battery"]},temp={self.datos["temp"]},capacity={self.datos["capacity"]},load={self.datos["load"]},life={self.datos["life"]},current={self.datos["current"]}")   
+        campos = ",".join([f"{k}={v}" for k, v in self.datos.items()])
+        print(f"ups_temp2,host={self.hostname} {campos}")   
     
-    def ejecutar(self,oidbateria,oidcapacidad,oidload,oidlife,oidcorriente,oidtemp,oidtemp2):
-        self.obtener_datos(oidbateria,oidcapacidad,oidload,oidlife,oidcorriente,oidtemp,oidtemp2)
+    def ejecutar(self,oid_dicc,oidtemp,oidtemp2):
+        self.obtener_datos(oid_dicc,oidtemp,oidtemp2)
         self.imprimir_telegraf()
