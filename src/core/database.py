@@ -60,3 +60,14 @@ class RepositorioDB:
                     (ups_host, tipo_error)
                 )
                 conn.commit()
+
+    def resolver_error(self, ups_host, tipo_error):
+        """Marca un error activo como resuelto."""
+        with self.lock:
+            with sqlite3.connect(self.db_file) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE errores SET estado_error='resuelto', fecha=CURRENT_TIMESTAMP WHERE ups_host=? AND tipo_error=? AND estado_error='activo'",
+                    (ups_host, tipo_error)
+                )
+                conn.commit()
