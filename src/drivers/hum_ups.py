@@ -6,8 +6,7 @@ class HumedadUPS(BaseUPS):
     
     def obtener_datos(self,oid_hum):
         """Cada driver debe saber que OID pedir"""
-        hum = self.clienteSNMP.obtener_valor(oid_hum)
-        self.datos["humidity"] = hum
+        self.datos["humidity"] = self.clienteSNMP.obtener_valor(oid_hum)
     
     def validar_datos_y_notificar(self):
         """Cada driver tiene sus propia logica para validar y generar las alertas"""
