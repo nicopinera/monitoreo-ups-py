@@ -5,6 +5,7 @@ from core.database import RepositorioDB
 from drivers.state_ups import StateUPS
 from drivers.dc_ups import DataCenterUPS
 from drivers.hum_ups import HumedadUPS
+from concurrent.futures import ThreadPoolExecutor
 
 def main():
     
@@ -35,12 +36,12 @@ def main():
     
     humedad_driver = HumedadUPS(hostname=c.HOST_NAME_HUMEDAD,clienteSNMP=cliente_snmp_humedad)
     
-    # humedad_driver.ejecutar(c.OID_HUMEDAD)
+    humedad_driver.ejecutar(c.OID_HUMEDAD)
     dc_driver.ejecutar(c.OID_DC)
-    """
-    # Obtener e imprimir datos de los UPS
-    for d in driver_state:
-        d.ejecutar(c.OID_UPS,c.OIDT,c.OIDTNEW)
-    """
+    
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        for d in driver_state:
+            executor.submit(d.ejecutar,c.OID_UPS,c.OIDT,c.OIDTNEW)
+            
 if __name__== "__main__":
     main()
