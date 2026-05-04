@@ -8,19 +8,30 @@ class StateUPS(BaseUPS):
         """Cada driver debe saber que OID pedir"""
         # Temperatura bateria
         
+        self.datos = {
+            "battery": 0,
+            "temp": 0,
+            "capacity": 0,
+            "load": 0,
+            "life": 0,
+            "current": 0
+        }
+        
         for nombre,oid in oid_dicc.items():
             dato_aux = self.clienteSNMP.obtener_valor(oid)
-            if dato_aux:
-                if nombre == 'life':
-                    self.datos[nombre] = round((int(dato_aux))/6000,2)
-                else:
-                    self.datos[nombre] = dato_aux
+            if dato_aux is not None:
+                try:
+                    if nombre == 'life':
+                        self.datos[nombre] = round((int(dato_aux))/6000,2)
+                    else:
+                        self.datos[nombre] = dato_aux
+                except (TypeError,ValueError) as e:
+                    self.datos[nombre] = 0
         
-        # I/O sensor de temperatura
-        try:
-            self.datos["temp"] = self.clienteSNMP.obtener_valor(oidtemp)
-        except:
-            self.datos["temp"] = self.clienteSNMP.obtener_valor(oidtemp2)
+        temp_val = self.clienteSNMP.obtener_valor(oidtemp)
+        if temp_val is None:
+            temp_val = self.clienteSNMP.obtener_valor(oidtemp2)
+        self.datos["temp"] = int(temp_val) if temp_val is not None else 0
     
     def _gestionar_error_db(self, hay_error, msj_error, nombre_error_str, lista_mensajes):
         """
@@ -81,12 +92,15 @@ class StateUPS(BaseUPS):
             cuerpo = "\n".join(mensajes)
             self.notificador.enviar_mensajes(f"{encabezado}\n{cuerpo}")
 
-
     def imprimir_telegraf(self):
         """Cada driver imprime su formato para grafana/telegraf"""
         campos = ",".join([f"{k}={v}" for k, v in self.datos.items()])
         print(f"ups_temp2,host={self.hostname} {campos}")   
     
     def ejecutar(self,oid_dicc,oidtemp,oidtemp2):
-        self.obtener_datos(oid_dicc,oidtemp,oidtemp2)
-        self.imprimir_telegraf()
+        try:
+            self.obtener_datos(oid_dicc,oidtemp,oidtemp2)
+            self.imprimir_telegraf()
+            self.validar_datos_y_notificar()
+        except Exception as e:
+            print(f"Error al ejecutar StateUPS para {self.hostname}: {e}")

@@ -1,5 +1,5 @@
 import config.configuracion as c
-from errores import Errores
+from core.errores import Errores
 
 def validar_temp_bateria(valor):
     """
