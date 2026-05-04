@@ -31,4 +31,4 @@ run_state:
 	./main.py
 
 install_dependencias_ci:
-	pip install pytest
+	pip install pytest dotenv httplib2 easysnmp
