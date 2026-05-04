@@ -1,0 +1,248 @@
+Este documento trata de los pasos a seguir para la 
+implementacion de una pagina dinamica que haga uso del 
+codigo creado en esta misma carpeta llamado database.py 
+con el objetivo de agilizar mas el sistema y la administracion
+de la base de datos
+
+Concentrandonos principalmente en el funcionamiento de database.py 
+podemos sacar las siguientes conclusiones:
+
+Tener secciones para cada función de database.py (por ejemplo, formularios para buscar, agregar o resolver errores manualmente).
+
+Una sección adicional para subir un PDF, que analice automáticamente el contenido del PDF, detecte el "objetivo" (por ejemplo, 
+que acción realizar basada en el texto, como "agregar error X para UPS Y"), y ejecute las funciones necesarias sin intervención manual.
+
+Dado que el proyecto esta en python la mejor opcion es usar Flask.
+Para el front, HTML, CSS y java.
+Para el procesamiento de PDF, usaremos librerías como PyPDF2 o pdfplumber para extraer texto,
+y luego lógica simple (regex o patrones) para detectar acciones.
+
+Advertencias importantes antes de empezar:
+
+Seguridad: Manejar bases de datos y uploads de archivos requiere precauciones (validación de inputs, protección contra inyección SQL, límites de tamaño de archivos). No expongas la app en producción sin HTTPS y autenticación.
+Dependencias: Asegúrate de tener Python 3.8+ instalado. Instala paquetes con pip.
+Pruebas: El código existente tiene algunos errores menores (ej. en database.py: self.conn debería ser self.conexion, y hay un typo en reusultado). Corrígelo antes de integrar.
+Escalabilidad: Si el proyecto crece, considera migrar a Django o una base de datos más robusta como PostgreSQL.
+Asunción sobre PDF: Asumiré que el PDF contiene texto estructurado (ej. "Agregar error de batería baja para UPS servidor1"). Usaremos patrones simples para detectar acciones. Si el PDF es más complejo (imágenes, tablas), necesitarías OCR (ej. con Tesseract).
+
+Paso 1: Preparar el Entorno y Corregir el Código Existente
+
+Corrige errores en database.py:
+
+En agregar_error y resolver_error, cambia self.conn.commit() a self.conexion.commit() (es un typo).
+En error_resuelto, cambia reusultado a resultado.
+Asegúrate de que c.ARCHIVO_CREACION_TABLA_STATE apunte correctamente al archivo SQL (probablemente creacion_tabla_state.sql).
+
+2. Instala dependencias necesarias:
+
+Ejecuta en terminal: pip install flask flask-wtf werkzeug pypdf2 (Flask para la web, WTForms para formularios, Werkzeug para uploads, PyPDF2 para PDFs).
+Para estética: pip install flask-bootstrap (opcional, para integrar Bootstrap fácilmente).
+
+3. Crea una estructura de carpetas para la web app dentro del workspace (ej. en /home/juan_ignacio/Documentos/monitoreo-ups/web_app/):
+
+web_app/
+    app.py          # Archivo principal de Flask
+    templates/      # Plantillas HTML
+        base.html
+        index.html
+        buscar_error.html
+        agregar_error.html
+        resolver_error.html
+        subir_pdf.html
+    static/         # CSS, JS, imágenes
+        css/
+            styles.css
+        js/
+            scripts.js
+    uploads/        # Carpeta para PDFs subidos (crea esta carpeta)
+
+    
+    
+Paso 2: Configurar la Aplicación Web con Flask
+
+1. Crea app.py (el corazón de la app):
+Importa Flask y tu database.py.
+
+Define rutas (endpoints) para cada función de database.py.
+
+Para el PDF: Una ruta que reciba el archivo, extraiga texto, analice patrones y ejecute funciones automáticamente.
+
+Código de ejemplo básico:
+
+from flask import Flask, render_template, request, flash, redirect, url_for
+from werkzeug.utils import secure_filename
+import os
+import re
+from src.core.database import RepositorioDB  # Importa tu clase existente
+import config.configuracion as c  # Para la DB
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'tu_clave_secreta'  # Cambia por algo seguro
+app.config['UPLOAD_FOLDER'] = 'web_app/uploads/'  # Carpeta para PDFs
+app.config['ALLOWED_EXTENSIONS'] = {'pdf'}
+
+# Instancia de la DB (reutiliza tu código)
+db = RepositorioDB(c.DB_FILE)  # Asegúrate de que c.DB_FILE esté definido
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+# Ruta para buscar error activo
+@app.route('/buscar_error_activo', methods=['GET', 'POST'])
+def buscar_error_activo():
+    if request.method == 'POST':
+        ups_host = request.form['ups_host']
+        tipo_error = request.form['tipo_error']
+        resultado = db.error_activo(ups_host, tipo_error)
+        if resultado:
+            flash(f"Error activo encontrado: {resultado}", 'success')
+        else:
+            flash("No se encontró error activo.", 'warning')
+        return redirect(url_for('buscar_error_activo'))
+    return render_template('buscar_error.html')
+
+# Similar para error_resuelto, agregar_error, resolver_error (crea rutas análogas)
+
+# Ruta para subir PDF
+@app.route('/subir_pdf', methods=['GET', 'POST'])
+def subir_pdf():
+    if request.method == 'POST':
+        file = request.files['file']
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            
+            # Procesar PDF
+            texto = extraer_texto_pdf(filepath)
+            acciones = detectar_acciones(texto)
+            ejecutar_acciones(acciones)
+            
+            flash("PDF procesado y acciones ejecutadas.", 'success')
+            return redirect(url_for('subir_pdf'))
+        else:
+            flash("Archivo no válido.", 'error')
+    return render_template('subir_pdf.html')
+
+def extraer_texto_pdf(filepath):
+    from PyPDF2 import PdfReader
+    reader = PdfReader(filepath)
+    texto = ""
+    for page in reader.pages:
+        texto += page.extract_text()
+    return texto
+
+def detectar_acciones(texto):
+    acciones = []
+    # Patrones simples para detectar acciones (ajusta según tu PDF)
+    if re.search(r'agregar error (\w+) para UPS (\w+)', texto, re.IGNORECASE):
+        match = re.search(r'agregar error (\w+) para UPS (\w+)', texto, re.IGNORECASE)
+        acciones.append({'tipo': 'agregar', 'tipo_error': match.group(1), 'ups_host': match.group(2)})
+    if re.search(r'resolver error (\w+) para UPS (\w+)', texto, re.IGNORECASE):
+        match = re.search(r'resolver error (\w+) para UPS (\w+)', texto, re.IGNORECASE)
+        acciones.append({'tipo': 'resolver', 'tipo_error': match.group(1), 'ups_host': match.group(2)})
+    # Agrega más patrones según necesites
+    return acciones
+
+def ejecutar_acciones(acciones):
+    for accion in acciones:
+        if accion['tipo'] == 'agregar':
+            db.agregar_error(accion['ups_host'], accion['tipo_error'])
+        elif accion['tipo'] == 'resolver':
+            db.resolver_error(accion['ups_host'], accion['tipo_error'])
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+Explicación: Las rutas GET/POST manejan formularios. Para el PDF, extrae texto y usa regex para detectar frases como "agregar error batería para UPS servidor1". Ejecuta las funciones de database.py automáticamente.
+
+Paso 3: Crear las Plantillas HTML (Frontend)
+
+Instala Bootstrap para estética: Agrega <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"> en las plantillas.
+
+Crea templates/base.html (plantilla base para consistencia):
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Monitoreo UPS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">Monitoreo UPS</a>
+            <div class="navbar-nav">
+                <a class="nav-link" href="/buscar_error_activo">Buscar Error</a>
+                <a class="nav-link" href="/agregar_error">Agregar Error</a>
+                <a class="nav-link" href="/resolver_error">Resolver Error</a>
+                <a class="nav-link" href="/subir_pdf">Subir PDF</a>
+            </div>
+        </div>
+    </nav>
+    <div class="container mt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'success' if category == 'success' else 'warning' if category == 'warning' else 'danger' }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/scripts.js') }}"></script>
+</body>
+</html>
+
+3. Crea plantillas específicas (ej. buscar_error.html):
+{% extends "base.html" %}
+{% block content %}
+<h2>Buscar Error Activo</h2>
+<form method="POST">
+    <div class="mb-3">
+        <label for="ups_host" class="form-label">Host UPS</label>
+        <input type="text" class="form-control" id="ups_host" name="ups_host" required>
+    </div>
+    <div class="mb-3">
+        <label for="tipo_error" class="form-label">Tipo de Error</label>
+        <input type="text" class="form-control" id="tipo_error" name="tipo_error" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Buscar</button>
+</form>
+{% endblock %}
+
+Crea plantillas similares para agregar_error.html, resolver_error.html y subir_pdf.html (esta última con <input type="file" name="file">).
+
+4. Personaliza CSS en static/css/styles.css: Agrega colores, fuentes y responsive design para que sea "estéticamente buena".
+
+
+Paso 4: Implementar la Lógica de Procesamiento de PDF
+
+1. Mejora la detección: En detectar_acciones, agrega más patrones regex basados en ejemplos reales de tus PDFs. Si el PDF es complejo, considera pdfplumber para tablas o pytesseract para OCR.
+2. Validación: Después de detectar acciones, muestra un resumen al usuario antes de ejecutar (para evitar errores automáticos).
+3. Manejo de errores: Agrega try-except en ejecutar_acciones para manejar fallos en la DB.
+
+Paso 5: Probar y Depurar
+
+1. Ejecuta la app: python web_app/app.py. Ve a http://127.0.0.1:5000/ en tu navegador.
+2. Prueba cada sección: Usa formularios manuales y sube un PDF de prueba con texto como "Agregar error batería para UPS servidor1".
+3. Depura: Usa print() en app.py para logs. Corrige errores con herramientas como get_errors si es necesario.
+4. Valida la DB: Después de acciones, verifica la SQLite con un cliente como DB Browser.
+
+Paso 6: Despliegue y Mejoras
+1. Despliegue local: Usa gunicorn para producción local: pip install gunicorn; gunicorn app:app.
+2. Mejoras futuras:
+    Agrega autenticación (Flask-Login).
+    Integra con el resto del proyecto (ej. llamar a DataCenterUPS desde la web).
+    Hazla responsive con Bootstrap.
+    Si necesitas más dinamismo, agrega JavaScript (ej. AJAX para actualizaciones en vivo).
+3. Documentación: Crea un README.md en web_app/ con instrucciones de instalación y uso.
+
+Si sigues estos pasos, tendrás una página funcional que reutiliza database.py. Si encuentras problemas específicos (ej. con PDFs o errores en el código), comparte más detalles para refinar. ¡Éxito!
