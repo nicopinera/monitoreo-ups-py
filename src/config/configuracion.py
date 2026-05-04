@@ -31,6 +31,25 @@ OID_V_OUT_AN = '1.3.6.1.4.1.534.1.4.4.1.2.1'
 OID_V_OUT_BN = '1.3.6.1.4.1.534.1.4.4.1.2.2'
 OID_V_OUT_CN = '1.3.6.1.4.1.534.1.4.4.1.2.3'
 
+OID_DC={
+    "autonomia": OID_AUTONOMIA,
+    "carga_bat":OID_CARGA_BATERIA,
+    "bat_temp":OID_TEMP_BATERIA,
+    "carga_out": OID_CARGA_OUT,
+    "corriente_out_f1":OID_CORRIENTE_OUT_F1,
+    "corriente_out_f2":OID_CORRIENTE_OUT_F2,
+    "corriente_out_f3":OID_CORRIENTE_OUT_F3,
+    "voltaje_out":OID_VOLTAJE_OUT,
+    "voltaje_an_input":OID_V_AN,
+    "voltaje_bn_input":OID_V_BN,
+    "voltaje_cn_input":OID_V_CN,
+    "voltaje_out_an": OID_V_OUT_AN,
+    "voltaje_out_bn": OID_V_OUT_BN,
+    "voltaje_out_cn": OID_V_OUT_CN
+}
+
+OID_UPS={}
+
 # Temperaturas de las baterias
 OIDB='1.3.6.1.4.1.318.1.1.1.2.2.2.0'
 
