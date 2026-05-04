@@ -1,4 +1,4 @@
-from drivers.ups_base import BaseUPS
+from src.core.ups_base import BaseUPS
 from core.validacion import *
 class StateUPS(BaseUPS):
     def __init__(self, hostname, clienteSNMP, notificador=None, rep_db=None):

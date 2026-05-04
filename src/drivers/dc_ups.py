@@ -1,4 +1,4 @@
-from drivers.ups_base import BaseUPS
+from src.core.ups_base import BaseUPS
 import config.configuracion as c
 
 class DataCenterUPS(BaseUPS):
