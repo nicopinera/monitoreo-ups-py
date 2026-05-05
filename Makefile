@@ -16,7 +16,8 @@ instalacion_requisitos:
 	sudo apt install python3-httplib2;\
 
 	@echo "Instalando pytest" ;\
-	sudo apt install python3-pytest
+	sudo apt install python3-pytest;\
+	sudo apt install python3-pytest-cov
 
 run_hum:
 	@echo "Corriendo monitoreo de humedad..."
@@ -31,4 +32,4 @@ run_state:
 	./main.py
 
 install_dependencias_ci:
-	pip install pytest
+	pip install pytest dotenv httplib2 easysnmp
