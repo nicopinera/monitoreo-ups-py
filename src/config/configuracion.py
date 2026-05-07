@@ -91,4 +91,8 @@ ARCHIVO_DB = os.path.join(RUTA_RAIZ,'data','errores.db')
 ARCHIVO_CREACION_TABLA_STATE = os.path.join(RUTA_RAIZ,'data','creacion_tabla_state.sql')
 VAR_PASSWORDCHAT = 'PASSWORDCHAT'
 
+LOGS_DIR = os.path.join(RUTA_RAIZ, "logs")
+APP_LOG_FILE = os.path.join(LOGS_DIR, "app.log")
+ERROR_LOG_FILE = os.path.join(LOGS_DIR, "errors.log")
+
 

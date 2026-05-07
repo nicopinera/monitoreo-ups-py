@@ -1,6 +1,9 @@
 import sqlite3
 import threading
 import config.configuracion as c
+from config.logger import get_logger
+
+logger = get_logger(__name__)
 
 class RepositorioDB:
     def __init__(self, db_file):
@@ -15,7 +18,7 @@ class RepositorioDB:
                 conn.executescript(tabla)
                 conn.commit()
         except sqlite3.Error as e:
-            print(f"Error al ejecutar el script de creación de tablas: {e}")
+            logger.error("Error al ejecutar el script de creación de tablas", exc_info=True)
 
     def error_activo(self, ups_host, tipo_error):
         """Busca errores activos específicos de un UPS."""

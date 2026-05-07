@@ -1,5 +1,10 @@
-from src.core.ups_base import BaseUPS
+from config.logger import get_logger, get_telegraf_logger
+from core.ups_base import BaseUPS
 from core.validacion import *
+
+logger = get_logger(__name__)
+telegraf_logger = get_telegraf_logger()
+
 class StateUPS(BaseUPS):
     def __init__(self, hostname, clienteSNMP, notificador=None, rep_db=None):
         super().__init__(hostname, clienteSNMP, notificador, rep_db)
@@ -95,12 +100,12 @@ class StateUPS(BaseUPS):
     def imprimir_telegraf(self):
         """Cada driver imprime su formato para grafana/telegraf"""
         campos = ",".join([f"{k}={v}" for k, v in self.datos.items()])
-        print(f"ups_temp2,host={self.hostname} {campos}")   
+        telegraf_logger.info(f"ups_temp2,host={self.hostname} {campos}")   
     
     def ejecutar(self,oid_dicc,oidtemp,oidtemp2):
         try:
             self.obtener_datos(oid_dicc,oidtemp,oidtemp2)
             self.imprimir_telegraf()
             self.validar_datos_y_notificar()
-        except Exception as e:
-            print(f"Error al ejecutar StateUPS para {self.hostname}: {e}")
+        except Exception:
+            logger.exception("Error al ejecutar StateUPS para %s", self.hostname)
