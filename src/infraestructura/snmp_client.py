@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 
 from easysnmp import Session, EasySNMPTimeoutError
 import config.configuracion as c

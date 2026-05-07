@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 
 from config.logger import get_logger, get_telegraf_logger
 from core.ups_base import BaseUPS
