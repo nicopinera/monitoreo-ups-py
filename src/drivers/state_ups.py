@@ -3,6 +3,7 @@
 from config.logger import get_logger, get_telegraf_logger
 from core.ups_base import BaseUPS
 from core.validacion import *
+from datetime import datetime
 
 logger = get_logger(__name__)
 telegraf_logger = get_telegraf_logger()
@@ -96,8 +97,10 @@ class StateUPS(BaseUPS):
         
         if mensajes:
             encabezado = f"🔔 *Reporte de Estado: {self.hostname}*\n"
+            ahora = datetime.now()
+            fecha_string = ahora.strftime("%d/%m/%Y %H:%M:%S")
             cuerpo = "\n".join(mensajes)
-            self.notificador.enviar_mensajes(f"{encabezado}\n{cuerpo}")
+            self.notificador.enviar_mensajes(f"{encabezado}\n{cuerpo}\n\n📅 *Fecha informe:* {fecha_string}")
 
     def imprimir_telegraf(self):
         """Cada driver imprime su formato para grafana/telegraf"""
