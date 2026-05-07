@@ -101,8 +101,7 @@ class StateUPS(BaseUPS):
 
     def imprimir_telegraf(self):
         """Cada driver imprime su formato para grafana/telegraf"""
-        campos = ",".join([f"{k}={v}" for k, v in self.datos.items()])
-        telegraf_logger.info(f"ups_temp2,host={self.hostname} {campos}")   
+        print(f"ups_temp2,host={self.hostname} battery={self.datos["battery"]},temp={self.datos["temp"]},capacity={self.datos["capacity"]},load={self.datos["load"]},life={self.datos["life"]},current={self.datos["current"]}")
     
     def ejecutar(self,oid_dicc,oidtemp,oidtemp2):
         try:
