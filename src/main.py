@@ -1,4 +1,5 @@
 import config.configuracion as c
+from config.logger import get_logger
 from infraestructura.notificador import Notificador
 from infraestructura.snmp_client import ClienteSNMP
 from infraestructura.database import RepositorioDB
@@ -7,7 +8,10 @@ from drivers.dc_ups import DataCenterUPS
 from drivers.hum_ups import HumedadUPS
 from concurrent.futures import ThreadPoolExecutor
 
+logger = get_logger(__name__)
+
 def main():
+    logger.info("Iniciando monitoreo UPS")
     
     # Creacion de clientes SNMP para host de state
     cliente_snmp_state = []
@@ -44,4 +48,8 @@ def main():
             executor.submit(d.ejecutar,c.OID_UPS,c.OIDT,c.OIDTNEW)
             
 if __name__== "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        logger.exception("Error fatal en el flujo principal")
+        raise

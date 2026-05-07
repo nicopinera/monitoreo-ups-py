@@ -1,8 +1,11 @@
 from dotenv import load_dotenv
 import os, time
 import config.configuracion as c
+from config.logger import get_logger
 from httplib2 import Http
 from json import dumps
+
+logger = get_logger(__name__)
 
 class Notificador:
     def __init__(self,ruta_env):
@@ -11,7 +14,7 @@ class Notificador:
     
     def enviar_mensajes(self,msg):
         if not self.url:
-            print("Error: URL de Google Chat no configurada (PASSWORDCHAT).")
+            logger.error("URL de Google Chat no configurada (PASSWORDCHAT).")
             return
             
         message_headers = {"Content-Type": "application/json; charset=UTF-8"}
@@ -29,6 +32,6 @@ class Notificador:
             )
             
             if response.status != 200:
-                print(f"Error al enviar mensaje a Google Chat: {response.status} - {content.decode('utf-8')}")
-        except Exception as e:
-            print(f"Excepción al enviar mensaje a Google Chat: {e}")
+                logger.error("Error al enviar mensaje a Google Chat: %s - %s", response.status, content.decode('utf-8'))
+        except Exception:
+            logger.error("Excepción al enviar mensaje a Google Chat", exc_info=True)

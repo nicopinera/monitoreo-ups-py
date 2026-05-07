@@ -1,5 +1,8 @@
 from easysnmp import Session, EasySNMPTimeoutError
 import config.configuracion as c
+from config.logger import get_logger
+
+logger = get_logger(__name__)
 
 class ClienteSNMP:
     def __init__(self,hostname):
@@ -10,6 +13,9 @@ class ClienteSNMP:
         try:
             valor_aux = self.session.get(oid).value
             return valor_aux
-        except (EasySNMPTimeoutError,Exception) as error:  
-            # print(f"Ocurrió un error inesperado: {error}. El programa terminará. ")
+        except EasySNMPTimeoutError:
+            logger.warning("Timeout SNMP en %s OID %s", self.fullhostname, oid)
+            return None
+        except Exception:
+            logger.error("Error al obtener valor SNMP de %s para OID %s", self.fullhostname, oid, exc_info=True)
             return None

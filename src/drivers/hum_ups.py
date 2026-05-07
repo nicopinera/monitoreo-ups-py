@@ -1,4 +1,8 @@
-from src.core.ups_base import BaseUPS
+from config.logger import get_logger, get_telegraf_logger
+from core.ups_base import BaseUPS
+
+logger = get_logger(__name__)
+telegraf_logger = get_telegraf_logger()
 
 class HumedadUPS(BaseUPS):
     def __init__(self, hostname, clienteSNMP, notificador=None, rep_db=None):
@@ -14,7 +18,7 @@ class HumedadUPS(BaseUPS):
             self.datos["humidity"] = 0
 
     def imprimir_telegraf(self):
-        print(f"ups_temp2,host={self.hostname} humidity={self.datos["humidity"]}")
+        telegraf_logger.info(f"ups_temp2,host={self.hostname} humidity={self.datos['humidity']}")
     
     def ejecutar(self,oid_hum):
         self.obtener_datos(oid_hum)
