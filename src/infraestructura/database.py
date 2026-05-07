@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sqlite3
 import threading
 import config.configuracion as c

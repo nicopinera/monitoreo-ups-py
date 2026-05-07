@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import config.configuracion as c
 from core.errores import Errores
 
