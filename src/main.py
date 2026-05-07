@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import config.configuracion as c
 from config.logger import get_logger
 from infraestructura.notificador import Notificador
