@@ -2,4 +2,11 @@ __pycache__/
 .env
 *.db
 venv/
+.venv/
 .coverage
+logs/
+
+Dockerfile
+docker-compose.yml
+
+requirements.txt
