@@ -6,6 +6,196 @@ El proyecto se divide en dos módulos independientes que recopilan información 
 
 ---
 
+## 🎯 Objetivo Macro del Proyecto
+
+El **Monitoreo UPS** es un sistema automatizado de vigilancia en tiempo real de equipos de alimentación ininterrumpida (UPS) distribuidos en múltiples pisos de un datacenter. El sistema:
+
+- **Recopila métricas** de 24+ UPS mediante protocolo SNMP (temperatura de batería, carga, autonomía, voltajes, corrientes)
+- **Detecta anomalías** comparando lecturas contra umbrales configurables
+- **Almacena historial** de errores en base de datos SQLite para evitar alertas duplicadas
+- **Notifica automáticamente** al equipo técnico vía Google Chat cuando se detectan problemas o resoluciones
+- **Exporta datos** en formato Telegraf/InfluxDB para visualización en Grafana
+- **Ejecuta en paralelo** monitoreo de múltiples UPS para minimizar tiempo de ciclo
+
+El sistema está diseñado para **reducir tiempo de respuesta** ante fallos de energía críticos y proporcionar **visibilidad centralizada** del estado de la infraestructura de energía.
+
+---
+
+## 📋 Requisitos Previos
+
+### Software
+- **Python**: 3.7 o superior
+- **pip**: Gestor de paquetes de Python
+- **Git**: Para clonar el repositorio (opcional)
+
+### Acceso de Red
+- **Conectividad SNMP** (puerto 161) a todos los UPS en dominio `.psi.unc.edu.ar`
+- **Comunidad SNMP**: Credencial `publicapc` configurada en los UPS
+
+### Configuración Requerida
+- **Archivo `.env`**: Debe contener la URL del webhook de Google Chat:
+  ```bash
+  PASSWORDCHAT=https://chat.googleapis.com/v1/spaces/...
+  ```
+- **Acceso a base de datos**: Permisos para crear/escribir en directorio `./data/`
+- **Permisos de logs**: Permisos para crear directorio `./logs/`
+
+### Dependencias Python
+Ver [requirements.txt](requirements.txt) para la lista completa. Las principales son:
+- `easysnmp`: Comunicación SNMP
+- `httplib2`: Envío de alertas vía webhook
+- `python-dotenv`: Gestión de variables de entorno
+
+---
+
+## 🚀 Instalación
+
+### Paso 1: Clonar el repositorio
+
+```bash
+git clone https://github.com/tu-usuario/monitoreo-ups.git
+cd monitoreo-ups
+```
+
+### Paso 2: Crear entorno virtual (recomendado)
+
+```bash
+# Crear entorno virtual
+python3 -m venv venv
+
+# Activar entorno virtual
+source venv/bin/activate  # En Windows: venv\Scripts\activate
+```
+
+### Paso 3: Instalar dependencias
+
+```bash
+# Instalar desde requirements.txt
+pip install -r requirements.txt
+```
+
+Verifica la instalación:
+```bash
+python -c "import easysnmp; print('✓ easysnmp instalado')"
+python -c "import httplib2; print('✓ httplib2 instalado')"
+```
+
+### Paso 4: Configurar variables de entorno
+
+Crear archivo `.env` en la raíz del proyecto:
+
+```bash
+cat > .env << EOF
+PASSWORDCHAT=https://chat.googleapis.com/v1/spaces/YOUR_WEBHOOK_URL
+EOF
+```
+
+Reemplaza `YOUR_WEBHOOK_URL` con tu URL de webhook de Google Chat.
+
+### Paso 5: Ajustar configuración (opcional)
+
+Editar `src/config/configuracion.py` si es necesario:
+- Cambiar hosts monitorados en `HOST_NAME_SHORT_F1`, `HOST_NAME_SHORT_F2`, `HOST_NAME_SHORT_F3`
+- Ajustar umbrales de alerta (`VALOR_TEMP_BAT_MAX`, `VALOR_CARGA_MIN`, etc.)
+- Modificar OIDs si se usan modelos de UPS diferentes
+
+---
+
+## 💡 Ejemplo Básico de Uso
+
+### Ejecución Manual
+
+```bash
+# Activar entorno virtual (si no está activo)
+source venv/bin/activate
+
+# Ejecutar monitoreo una vez
+cd /path/to/monitoreo-ups
+python -m src.main
+
+# Salida esperada:
+# dc-ups,host=ups-dc autonomia=45.50
+# ups_temp2,host=f1r2u1 battery=25,temp=22,capacity=95,load=35,life=15.50,current=5
+# ups_temp2,host=f1r3u1 battery=24,temp=21,capacity=94,load=38,life=14.75,current=5
+# ... (más líneas de Telegraf)
+# 🔔 *Reporte de Estado: f1r2u1*
+# ❌ [ADVERTENCIA] *TEMPERATURA_BATERIA_ALTA*: Valor actual *28 [°C]*
+# (en Google Chat)
+```
+
+### Ejecución Automatizada (Cron)
+
+Para ejecutar el monitoreo cada 5 minutos en Linux/Mac:
+
+```bash
+# Editar crontab
+crontab -e
+
+# Agregar línea (ejecutar cada 5 minutos)
+*/5 * * * * cd /path/to/monitoreo-ups && source venv/bin/activate && python -m src.main >> logs/cron.log 2>&1
+```
+
+### Verificar Logs
+
+```bash
+# Ver logs de aplicación
+tail -f logs/app.log
+
+# Ver logs de errores
+tail -f logs/errors.log
+
+# Ver últimos eventos Telegraf
+python -m src.main | grep "ups_temp2"
+```
+
+### Interpretación de Salida
+
+```
+# Formato Telegraf (para Grafana/InfluxDB)
+ups_temp2,host=f1r2u1 battery=25,temp=22,capacity=95,load=35,life=15.50,current=5
+           └─────┬─────┘ └──────────────────────────── valores ──────────────────────────┘
+              tag                                    fields
+
+# Ejemplo de alerta en Google Chat:
+🔔 *Reporte de Estado: f1r2u1*
+❌ [ADVERTENCIA] *TEMPERATURA_BATERIA_ALTA*: Valor actual *28 [°C]*
+✅ [RESUELTO] CARGA_MINIMA volvió a la normalidad.
+📅 *Fecha informe:* 13/05/2026 14:23:45
+```
+
+### Solución de Problemas Comunes
+
+**Error: "SNMP timeout"**
+```
+→ Verificar conectividad de red: ping f1r2u1.psi.unc.edu.ar
+→ Verificar comunidad SNMP en configuracion.py: COMMUNITY = "publicapc"
+```
+
+**Error: "URL de Google Chat no configurada"**
+```
+→ Asegurar .env existe y contiene PASSWORDCHAT=...
+→ Verificar que el webhook URL es válido (comienza con https://chat.googleapis.com)
+```
+
+**No aparecen alertas en Google Chat**
+```
+→ Verificar logs: cat logs/errors.log
+→ Probar conectividad: curl -X POST -H "Content-Type: application/json" \
+    -d '{"text":"test"}' https://chat.googleapis.com/v1/spaces/...
+```
+
+---
+
+## 📚 Documentación
+
+Para documentación detallada sobre:
+- **Configuración de Sphinx**: Ver [docs/GUIA_DOCUMENTACION.md](docs/GUIA_DOCUMENTACION.md)
+- **API Reference**: Después de generar con Sphinx, abrir `docs/_build/html/index.html`
+- **Arquitectura Técnica**: Ver [docs/arquitectura_y_uso.md](docs/arquitectura_y_uso.md)
+- **Diagnóstico**: Ver [docs/DIAGNOSTICO.md](docs/DIAGNOSTICO.md)
+
+---
+
 ## 📊 Arquitectura General del Sistema
 
 ```markdown

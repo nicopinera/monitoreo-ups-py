@@ -100,7 +100,7 @@ class StateUPS(BaseUPS):
     def imprimir_telegraf(self):
         """Cada driver imprime su formato para grafana/telegraf"""
         campos = ",".join([f"{k}={v}" for k, v in self.datos.items()])
-        telegraf_logger.info(f"ups_temp2,host={self.hostname} {campos}")   
+        print(f"ups_temp2,host={self.hostname} {campos}")   
     
     def ejecutar(self,oid_dicc,oidtemp,oidtemp2):
         try:
@@ -109,3 +109,5 @@ class StateUPS(BaseUPS):
             self.validar_datos_y_notificar()
         except Exception:
             logger.exception("Error al ejecutar StateUPS para %s", self.hostname)
+        except Exception as e:
+            print(f"Error al ejecutar StateUPS para {self.hostname}: {e}")

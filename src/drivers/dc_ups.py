@@ -49,7 +49,7 @@ class DataCenterUPS(BaseUPS):
         
         # Construir la línea de telegraf con todos los datos
         campos = ",".join([f"{k}={v}" for k, v in self.datos.items()])
-        telegraf_logger.info(f"dc-ups,host={self.hostname} {campos}")
+        print(f"dc-ups,host={self.hostname} {campos}")
     
     def ejecutar(self,oid_metricas_dc):
         self.obtener_datos(oid_metricas_dc)

@@ -1,3 +1,20 @@
+#!/usr/bin/python3
+"""Constantes de configuración para el sistema de monitoreo UPS.
+
+Este módulo centraliza todos los parámetros de configuración para la
+comunicación SNMP, definiciones de dispositivos, mapeo de OIDs y umbrales de
+alerta. Todos los valores deben actualizarse según la infraestructura de su
+centro de datos.
+
+Atributos:
+    COMMUNITY (str): Cadena de comunidad SNMP para autenticación.
+    VERSION_SNMP (int): Versión del protocolo SNMP (1, 2c o 3).
+    HOST_NAME_* (list): Listas de nombres de host UPS por zona/piso.
+    OID_* (str): Identificadores de objeto para consultas SNMP.
+    VALOR_*: Umbrales de alerta (temperaturas, carga, autonomía).
+    RUTA_* (str): Rutas del sistema de archivos para logs y datos.
+"""
+
 import os
 
 COMMUNITY = "publicapc"
