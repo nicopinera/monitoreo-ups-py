@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 from easysnmp import Session, EasySNMPTimeoutError
 import config.configuracion as c
 from config.logger import get_logger

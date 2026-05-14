@@ -1,6 +1,9 @@
+#!/usr/bin/python3
+
 from config.logger import get_logger, get_telegraf_logger
 from core.ups_base import BaseUPS
 from core.validacion import *
+from datetime import datetime
 
 logger = get_logger(__name__)
 telegraf_logger = get_telegraf_logger()
@@ -94,13 +97,14 @@ class StateUPS(BaseUPS):
         
         if mensajes:
             encabezado = f"🔔 *Reporte de Estado: {self.hostname}*\n"
+            ahora = datetime.now()
+            fecha_string = ahora.strftime("%d/%m/%Y %H:%M:%S")
             cuerpo = "\n".join(mensajes)
-            self.notificador.enviar_mensajes(f"{encabezado}\n{cuerpo}")
+            self.notificador.enviar_mensajes(f"{encabezado}\n{cuerpo}\n\n📅 *Fecha informe:* {fecha_string}")
 
     def imprimir_telegraf(self):
         """Cada driver imprime su formato para grafana/telegraf"""
-        campos = ",".join([f"{k}={v}" for k, v in self.datos.items()])
-        print(f"ups_temp2,host={self.hostname} {campos}")   
+        print(f"ups_temp2,host={self.hostname} battery={self.datos['battery']},temp={self.datos['temp']},capacity={self.datos['capacity']},load={self.datos['load']},life={self.datos['life']},current={self.datos['current']}")
     
     def ejecutar(self,oid_dicc,oidtemp,oidtemp2):
         try:
@@ -109,5 +113,3 @@ class StateUPS(BaseUPS):
             self.validar_datos_y_notificar()
         except Exception:
             logger.exception("Error al ejecutar StateUPS para %s", self.hostname)
-        except Exception as e:
-            print(f"Error al ejecutar StateUPS para {self.hostname}: {e}")

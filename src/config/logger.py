@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import logging
 from logging.handlers import RotatingFileHandler
 import os
