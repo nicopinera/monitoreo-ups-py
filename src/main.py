@@ -1,7 +1,9 @@
 #!/usr/bin/python3
 
 import config.configuracion as c
-from config.logger import get_logger
+import logging
+import warnings
+from infraestructura.logger import configurar_logger
 from infraestructura.notificador import Notificador
 from infraestructura.snmp_client import ClienteSNMP
 from infraestructura.database import RepositorioDB
@@ -10,7 +12,10 @@ from drivers.dc_ups import DataCenterUPS
 from drivers.hum_ups import HumedadUPS
 from concurrent.futures import ThreadPoolExecutor
 
-logger = get_logger(__name__)
+warnings.filterwarnings("ignore", category=UserWarning)
+configurar_logger(server_url="http://localhost:5341")
+logger = logging.getLogger(__name__)
+
 
 def main():
     logger.info("Iniciando monitoreo UPS")
@@ -52,6 +57,6 @@ def main():
 if __name__== "__main__":
     try:
         main()
-    except Exception:
-        logger.exception("Error fatal en el flujo principal")
+    except Exception as e:
+        logger.exception(f"Error fatal en el flujo principal: {e}",exc_info=e)
         raise

@@ -1,11 +1,7 @@
 #!/usr/bin/python3
 
-from config.logger import get_logger, get_telegraf_logger
 from core.ups_base import BaseUPS
 import config.configuracion as c
-
-logger = get_logger(__name__)
-telegraf_logger = get_telegraf_logger()
 
 class DataCenterUPS(BaseUPS):
     def __init__(self, hostname, clienteSNMP, notificador=None, rep_db=None):

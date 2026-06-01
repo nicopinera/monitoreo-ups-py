@@ -1,16 +1,14 @@
 #!/usr/bin/python3
 
-from config.logger import get_logger, get_telegraf_logger
 from core.ups_base import BaseUPS
 from core.validacion import *
 from datetime import datetime
-
-logger = get_logger(__name__)
-telegraf_logger = get_telegraf_logger()
+import logging
 
 class StateUPS(BaseUPS):
     def __init__(self, hostname, clienteSNMP, notificador=None, rep_db=None):
         super().__init__(hostname, clienteSNMP, notificador, rep_db)
+        self.logger = logging.getLogger(__name__)
     
     def obtener_datos(self, oid_dicc,oidtemp,oidtemp2):
         """Cada driver debe saber que OID pedir"""
@@ -111,5 +109,5 @@ class StateUPS(BaseUPS):
             self.obtener_datos(oid_dicc,oidtemp,oidtemp2)
             self.imprimir_telegraf()
             self.validar_datos_y_notificar()
-        except Exception:
-            logger.exception("Error al ejecutar StateUPS para %s", self.hostname)
+        except Exception as e:
+            self.logger.exception(f"Error al ejecutar StateUPS para {self.hostname}",host=self.hostname,error=e)
