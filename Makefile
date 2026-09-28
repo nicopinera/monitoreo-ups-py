@@ -4,9 +4,11 @@ instalacion_requisitos:
 
 	@echo "Instalando pip";\
 	sudo apt install python3-pip -y;\
+	sudo apt install python3-venv -y;\
 
 	@echo "Instalando easysnmp y snmp";\
 	sudo apt install snmp -y;\
+	sudo apt install build-essential libsnmp-dev -y;\
 	sudo apt install python3-easysnmp;\
 
 	@echo "Instalando dotenv";\
@@ -32,4 +34,5 @@ run_state:
 	./main.py
 
 install_dependencias_ci:
-	pip install pytest dotenv httplib2 easysnmp
+	python3 -m venv venv
+	venv/bin/python -m pip install pytest python-dotenv httplib2 easysnmp

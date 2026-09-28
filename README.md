@@ -268,7 +268,7 @@ HOST_NAME_SHORT     # Lista combinada
 | Temperatura batería | 27.0°C  | Máximo    |
 | Temperatura UIO     | 27.0°C  | Máximo    |
 | Carga batería       | 70.0%   | Mínimo    |
-| Carga de salida     | 45.0%   | Máximo    |
+| Carga de salida     | 60.0%   | Máximo    |
 | Tiempo autonomía    | 9.0 min | Mínimo    |
 
 ---

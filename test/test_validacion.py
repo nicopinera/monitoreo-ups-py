@@ -61,13 +61,13 @@ def test_validar_carga_fallo():
     assert msj == msj_esperado
     
 def test_validar_load_ok():
-    valor_load = 20 # Valor de temperatura correcto
+    valor_load = 46 # El valor reportado no debe superar el nuevo umbral
     error,msj = validar_load(valor=valor_load)
     assert error == None
     assert msj == None
 
 def test_validar_load_fallo():
-    valor_load = 50 # Valor mayor de lo correcto
+    valor_load = 61 # Valor por encima del nuevo umbral
     msj_esperado = f"[ADVERTENCIA] *{Errores.LOAD_MAXIMO.name}*: Valor actual *{valor_load} %*"
     error,msj = validar_load(valor=valor_load)
     assert error != None

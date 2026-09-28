@@ -12,6 +12,7 @@ run_tests:
     # Esta regla indica que el job solo se cree si el evento es un Merge Request
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   before_script:
+    - apt-get update && apt-get install -y build-essential libsnmp-dev
     - make install_dependencias_ci
   script:
     - pytest  # Ejecuta los tests
