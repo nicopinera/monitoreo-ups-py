@@ -84,7 +84,7 @@ OID_HUMEDAD = '1.3.6.1.4.1.318.1.1.25.1.2.1.7.2.1'
 VALOR_TEMP_BAT_MAX = 28
 VALOR_TEMP_UIO_MAX = 28
 VALOR_CARGA_MIN = 70
-VALOR_LOAD_MAX = 45
+VALOR_LOAD_MAX = 50             
 VALOR_AUTONOMIA_MIN = 9.0
 
 RUTA_RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
