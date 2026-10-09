@@ -91,3 +91,15 @@ def test_validar_autonomia_fallo():
     assert error.name == Errores.AUTONOMIA_MINIMO.name
     assert error.value == Errores.AUTONOMIA_MINIMO.value
     assert msj == msj_esperado
+
+def test_validar_respuesta_snmp_ok():
+    error,msj = validar_respuesta_snmp(hay_datos=True)
+    assert error is None
+    assert msj is None
+
+def test_validar_respuesta_snmp_fallo():
+    msj_esperado = f"[ADVERTENCIA] *{Errores.SIN_RESPUESTA_SNMP.name}*: El equipo no respondió a ninguna consulta SNMP"
+    error,msj = validar_respuesta_snmp(hay_datos=False)
+    assert error.name == Errores.SIN_RESPUESTA_SNMP.name
+    assert error.value == Errores.SIN_RESPUESTA_SNMP.value
+    assert msj == msj_esperado
