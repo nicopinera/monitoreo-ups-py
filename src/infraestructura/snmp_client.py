@@ -14,10 +14,10 @@ class ClienteSNMP:
             valor_aux = self.session.get(oid).value
             return valor_aux
         except EasySNMPTimeoutError:
-            self.logger.warning(f"Timeout SNMP en {self.fullhostname}",host=self.fullhostname, oid=oid)
+            self.logger.warning("Timeout SNMP en %s (oid=%s)", self.fullhostname, oid)
             return None
-        except Exception:
-            self.logger.error(f"Error al obtener valor SNMP de {self.fullhostname} para OID {oid}",exc_info=False, host=self.fullhostname, oid=oid)
+        except Exception as e:
+            self.logger.error("Error al obtener valor SNMP de %s (oid=%s): %s", self.fullhostname, oid, e)
             return None
 
     def obtener_valor_numerico(self,oid):

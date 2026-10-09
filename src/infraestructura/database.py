@@ -18,8 +18,8 @@ class RepositorioDB:
                     tabla = sql_script.read()
                 conn.executescript(tabla)
                 conn.commit()
-        except sqlite3.Error as e:
-            self.logger.error("Error al ejecutar el script de creación de tablas", exc_info=True)
+        except sqlite3.Error:
+            self.logger.exception("Error al ejecutar el script de creación de tablas")
 
     def error_activo(self, ups_host, tipo_error):
         """Busca errores activos específicos de un UPS."""

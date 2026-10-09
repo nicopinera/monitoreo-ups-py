@@ -32,6 +32,6 @@ class Notificador:
             )
             
             if response.status != 200:
-                self.logger.error("Error al enviar mensaje a Google Chat", status=response.status, contenido=content.decode('utf-8'))
+                self.logger.error("Error al enviar mensaje a Google Chat: status=%s respuesta=%s", response.status, content.decode('utf-8', errors='replace'))
         except Exception:
-            self.logger.error("Excepción al enviar mensaje a Google Chat", exc_info=True)
+            self.logger.exception("Excepción al enviar mensaje a Google Chat")

@@ -12,8 +12,6 @@ from drivers.dc_ups import DataCenterUPS
 from drivers.hum_ups import HumedadUPS
 from concurrent.futures import ThreadPoolExecutor
 
-warnings.filterwarnings("ignore", category=UserWarning)
-configurar_logger(server_url="http://localhost:5341")
 logger = logging.getLogger(__name__)
 
 
@@ -55,8 +53,11 @@ def main():
             executor.submit(d.ejecutar,c.OID_UPS,c.OIDT,c.OIDTNEW)
             
 if __name__== "__main__":
+    # Se configura recien al ejecutar, asi importar main (por ejemplo en los tests) no tiene efectos secundarios
+    warnings.filterwarnings("ignore", category=UserWarning)
+    configurar_logger()
     try:
         main()
-    except Exception as e:
-        logger.exception(f"Error fatal en el flujo principal: {e}",exc_info=e)
+    except Exception:
+        logger.exception("Error fatal en el flujo principal")
         raise

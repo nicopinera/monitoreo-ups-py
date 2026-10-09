@@ -126,5 +126,5 @@ class StateUPS(BaseUPS):
             self.obtener_datos(oid_dicc,oidtemp,oidtemp2)
             self.imprimir_telegraf()
             self.validar_datos_y_notificar()
-        except Exception as e:
-            self.logger.exception(f"Error al ejecutar StateUPS para {self.hostname}",host=self.hostname,error=e)
+        except Exception:
+            self.logger.exception("Error al ejecutar StateUPS para %s", self.hostname)
