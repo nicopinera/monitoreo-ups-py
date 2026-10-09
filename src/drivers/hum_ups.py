@@ -8,15 +8,17 @@ class HumedadUPS(BaseUPS):
     
     def obtener_datos(self,oid_hum):
         """Cada driver debe saber que OID pedir"""
-        self.datos["humidity"] = self.clienteSNMP.obtener_valor(oid_hum)
-    
+        self.datos["humidity"] = self.clienteSNMP.obtener_valor_numerico(oid_hum)
+
     def validar_datos_y_notificar(self):
-        """Cada driver tiene sus propia logica para validar y generar las alertas"""
-        if self.datos["humidity"] == None:
-            self.datos["humidity"] = 0
+        """El sensor de humedad no tiene alertas por ahora"""
+        pass
 
     def imprimir_telegraf(self):
-        print(f"ups_temp2,host={self.hostname} humidity={self.datos['humidity']}")
+        """Si no hay dato de humedad no se imprime la linea"""
+        campos = self._formatear_campos(("humidity",))
+        if campos:
+            print(f"ups_temp2,host={self.hostname} {campos}")
     
     def ejecutar(self,oid_hum):
         self.obtener_datos(oid_hum)
