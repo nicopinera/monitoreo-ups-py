@@ -74,6 +74,7 @@ Telegraf (VM) ──exec cada X s──▶ python3 src/main.py (repo clonado en 
 | [M7](#m7-configuración-y-secretos-hardcodeados)                            | Media     | Configuración y secretos en el código                             | [configuracion.py](../src/config/configuracion.py)                                                                          |
 | [M8](#m8-threadpoolexecutor-sin-control-de-resultados)                     | Media     | `ThreadPoolExecutor` sin control de resultados                    | [main.py](../src/main.py#L53-L55)                                                                                           |
 | [M9](#m9-easysnmp-sin-mantenimiento)                                       | Media     | `easysnmp` sin mantenimiento                                      | —                                                                                                                           |
+| [M10](#m10-mensajes-de-google-chat-más-claros)                             | Media     | Mensajes de Google Chat poco legibles                             | [state_ups.py](../src/drivers/state_ups.py#L96-L101), [notificador.py](../src/infraestructura/notificador.py)               |
 | [B1–B10](#24-prioridad-baja--deuda-técnica)                                | Baja      | Estilo, layout del paquete, tests, documentación desactualizada   | varios                                                                                                                      |
 
 ### 2.2 Prioridad alta
@@ -95,6 +96,13 @@ Todos los drivers inicializan las métricas en `0` y las dejan así si la consul
 - No validar umbrales sobre métricas sin dato.
 - Agregar un error de dominio `SIN_RESPUESTA_SNMP` que se notifique una sola vez y se resuelva cuando el equipo vuelva a responder, con la misma lógica de la base de datos.
 
+> **Estado: implementado.**
+>
+> - Las métricas sin dato no se imprimen y no se validan, así que no activan ni resuelven errores. Si un equipo no devuelve ningún dato, no se imprime su línea.
+> - `SIN_RESPUESTA_SNMP` se dispara sólo cuando **ningún** OID devolvió un valor numérico, y por ahora sólo en los UPS de state. El DC y el sensor de humedad sólo omiten campos; sus alertas llegan con M3.
+> - `ClienteSNMP.obtener_valor_numerico` convierte los valores no numéricos (`NOSUCH*`, vacío, `nan`) en `None`. Eso cubre la parte de A3 que afectaba a los drivers y hace que funcione el fallback de A4.
+> - Queda pendiente: exigir varias fallas seguidas antes de avisar, si aparecen equipos con fallas intermitentes.
+
 #### A2. Un error en el UPS del DC o en humedad aborta todo el monitoreo
 
 **Dónde:** [main.py:50-51](../src/main.py#L50-L51), [dc_ups.py:20-22](../src/drivers/dc_ups.py#L20-L22)
@@ -105,6 +113,14 @@ Todos los drivers inicializan las métricas en `0` y las dejan así si la consul
 - El proceso termina con código ≠ 0. Telegraf `inputs.exec` trata eso como error y **descarta toda la salida de esa ejecución**, incluida la línea de humedad que ya se había impreso.
 
 **Propuesta:** aislar cada driver en su propio `try/except`, como ya se hace en `StateUPS.ejecutar`. Que `main` siempre termine con código 0 si se pudo emitir al menos una métrica, y registrar en el log (stderr) cada driver que falle.
+
+> **Estado: implementado.**
+>
+> - `main` arma una tarea por equipo, y cada tarea crea su propio cliente SNMP. Esto quedó confirmado: con un host que no resuelve DNS, `Session()` lanza `EasySNMPConnectionError`, y antes eso tiraba abajo todo.
+> - Cada tarea corre dentro de `_ejecutar_protegido`, que registra la excepción y sigue con las demás.
+> - Código de salida: 0 si al menos una tarea terminó bien, 1 si fallaron todas o si falla la inicialización compartida (notificador, base de datos).
+> - El `try/except` de `StateUPS.ejecutar` pasó a `main`, así todos los drivers se protegen igual.
+> - También se lee el resultado de cada future, que era parte de M8.
 
 #### A3. Valores no numéricos rompen el line protocol
 
@@ -224,6 +240,14 @@ def configurar_logger() -> None:
 
 Nivel por defecto `WARNING`: en una ejecución normal no se escribe nada, y lo que aparezca en stderr es algo para mirar. Pasos del cambio: `uv remove seqlog`, reescribir las llamadas con kwargs y borrar `set_global_log_properties`/`log_to_seq`.
 
+> **Estado: implementado**, con un cambio respecto a la propuesta: además de stderr, los logs van a un **archivo rotativo** (`logs/monitoreo.log`, 5 MB × 5). El motivo es que Telegraf sólo muestra el stderr cuando la ejecución falla, y los warnings de una ejecución exitosa se perderían.
+>
+> - stderr muestra desde `WARNING`; el archivo, desde `LOG_LEVEL` (por defecto `INFO`).
+> - La carpeta se puede cambiar con `MONITOREO_LOG_DIR`.
+> - Si no se puede crear el archivo, se sigue sólo con stderr.
+>
+> Detalle en [docs/logger/Mejoras.md](logger/Mejoras.md). El `warnings.filterwarnings` se mantuvo, pero ahora se aplica al ejecutar y no al importar.
+
 #### M2. Salida a stdout desde varios hilos
 
 **Dónde:** [state_ups.py:105](../src/drivers/state_ups.py#L105)
@@ -315,6 +339,68 @@ Los `Future` de `executor.submit` se descartan: cualquier excepción que escape 
 `easysnmp` (0.2.6) no tiene releases desde hace años, es una extensión en C que necesita `libsnmp-dev` para compilarse y en la VM se instala desde `apt` (`python3-easysnmp`). En una imagen Docker con un Python más nuevo, la compilación puede fallar.
 
 **Propuesta:** en el primer build de la imagen, validar que compila contra `python:3.12-slim-bookworm`. A mediano plazo, evaluar `ezsnmp` (un fork mantenido con API casi idéntica) o `pysnmp` (Python puro, sin dependencias de C). Como `ClienteSNMP` ya aísla la librería, el cambio queda contenido en un solo archivo.
+
+#### M10. Mensajes de Google Chat más claros
+
+**Dónde:** [state_ups.py:96-101](../src/drivers/state_ups.py#L96-L101), [validacion.py](../src/core/validacion.py), [notificador.py](../src/infraestructura/notificador.py)
+
+Hoy el mensaje es texto plano armado en dos lugares: el dominio arma cada línea y el driver arma el encabezado y la fecha.
+
+```text
+🔔 *Reporte de Estado: f1r11u1*
+
+❌ [ADVERTENCIA] *LOAD_MAXIMO*: Valor actual *63 %*
+✅ [RESUELTO] CARGA_MINIMA volvió a la normalidad.
+
+📅 *Fecha informe:* 09/10/2026 14:32:05
+```
+
+Problemas:
+
+- Se muestra el nombre técnico del `Enum` (`LOAD_MAXIMO`) en lugar de un texto legible.
+- No se informa el umbral: "63 %" no dice si el límite es 60 o 50.
+- Los "resuelto" no informan el valor actual ni cuánto duró el problema.
+- No hay un enlace para ir directo a Grafana.
+- Cada alerta y su resolución llegan como mensajes sueltos y difíciles de seguir en un espacio con 28 equipos.
+
+**Propuesta:**
+
+1. **Tarjetas (`cardsV2`)** en lugar de texto plano. Los webhooks de Google Chat aceptan tarjetas con encabezado, secciones, íconos y botones. Se mantiene el campo `text` como resumen corto, que es lo que se ve en la notificación del celular. Hay que **probarlo antes con un webhook de prueba**.
+2. **Contenido de cada alerta:**
+   - Nombre legible: "Carga de salida alta".
+   - Valor y umbral: `63 % (máx. 60 %)`.
+   - Severidad, con color o ícono según sea advertencia o resolución.
+   - Equipo y fecha.
+3. **Resoluciones informativas:** "Carga de salida normalizada: 48 % · duró 2 h 15 min". La duración sale de la `fecha` de activación guardada en la base, leída antes de resolver (depende de M5).
+4. **Botón "Ver en Grafana"** con la URL del dashboard filtrada por `host` (variable de entorno `GRAFANA_URL`).
+5. **Hilos por equipo:** usar el parámetro `threadKey` del webhook (con `messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD`) para que todas las alertas y resoluciones de un UPS queden en el mismo hilo.
+6. **Separar responsabilidades:**
+   - El dominio devuelve objetos `Alerta` (tipo, valor, umbral, unidad, estado), sin formato.
+   - Un `FormateadorGoogleChat` en infraestructura arma la tarjeta.
+   - Cambiar el diseño del mensaje no toca ni las validaciones ni los drivers.
+
+Ejemplo de tarjeta (simplificado):
+
+```json
+{
+  "text": "⚠️ f1r11u1: carga de salida alta (63 %)",
+  "cardsV2": [{
+    "cardId": "alerta-f1r11u1",
+    "card": {
+      "header": { "title": "UPS f1r11u1", "subtitle": "1 alerta nueva · 1 resuelta" },
+      "sections": [{
+        "widgets": [
+          { "decoratedText": { "topLabel": "⚠️ Carga de salida alta", "text": "<b>63 %</b> (máx. 60 %)" } },
+          { "decoratedText": { "topLabel": "✅ Carga de batería normalizada", "text": "98 % · duró 2 h 15 min" } },
+          { "buttonList": { "buttons": [{ "text": "Ver en Grafana", "onClick": { "openLink": { "url": "https://grafana/...&var-host=f1r11u1" } } }] } }
+        ]
+      }]
+    }
+  }]
+}
+```
+
+Depende de M6 (que el dominio devuelva alertas estructuradas) y de A8 (que el envío informe si salió bien).
 
 ### 2.4 Prioridad baja / deuda técnica
 
@@ -648,7 +734,7 @@ Notas:
 - **Estado fuera de la imagen:** volumen `/var/lib/monitoreo-ups` → `/data` (SQLite). Ver [A6](#a6-el-estado-y-los-secretos-viven-dentro-del-repo).
 - **Secretos fuera de la imagen:** `--env-file /etc/monitoreo-ups/monitoreo.env`. **Nunca** hacer `COPY .env`.
 - **Red:** `--network host`, para llegar a los UPS por SNMP con la misma resolución DNS y rutas que la VM, sin configurar redes de Docker.
-- **stdout limpio:** en stdout sólo puede salir line protocol, los logs van a stderr (M1). No usar `-t` en `docker run`, porque la TTY agrega `\r` y rompe el parseo.
+- **stdout limpio:** en stdout sólo puede salir line protocol. Los logs van a stderr y a `/data/logs/monitoreo.log`, dentro del volumen (M1). No usar `-t` en `docker run`, porque la TTY agrega `\r` y rompe el parseo.
 
 ### 5.2 `Dockerfile` propuesto
 
@@ -701,6 +787,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     MONITOREO_DATA_DIR=/data \
+    MONITOREO_LOG_DIR=/data/logs \
     MONITOREO_VERSION="${GIT_SHA}"
 
 USER ups
@@ -756,7 +843,7 @@ GOOGLE_CHAT_WEBHOOK_URL=https://chat.googleapis.com/v1/spaces/...
 SNMP_COMMUNITY=...
 SNMP_TIMEOUT=1
 SNMP_RETRIES=1
-LOG_LEVEL=WARNING
+LOG_LEVEL=INFO          # nivel del archivo /data/logs/monitoreo.log; stderr siempre desde WARNING
 MAX_WORKERS=13
 ```
 
@@ -923,59 +1010,86 @@ Cambiar `LOCK_FILE` a una ruta donde `deploy-ups` pueda escribir si `/var/lock` 
 
 ## 7. Hoja de ruta por fases
 
-Cada fase es un MR independiente, en este orden. Las fases 1 y 2 se pueden hacer en paralelo con la fase 0.
+Cada paso es **un MR independiente**, en este orden. El orden sigue tres criterios:
 
-### Fase 0 — Bugs críticos (sobre el código actual)
+1. **Primero los cambios chicos y aislados sobre el código actual.** Se pueden desplegar enseguida y corrigen bugs que hoy afectan a producción.
+2. **Después las herramientas** (paquete, uv, formato, CI). Así los refactors grandes llegan con lint, tipado y tests protegiendo, y sus diffs no se mezclan con cambios de formato.
+3. **Al final los refactors de dominio**, cuando ya existe el deploy automático y cada cambio llega a la VM solo.
 
-- [ ] A2: aislar cada driver en `try/except` y salir con código 0 si hubo métricas.
-- [ ] A4 / A3: `ClienteSNMP` devuelve `float | None` y detecta `NOSUCH*`.
-- [ ] A1: no publicar ni validar métricas sin dato; agregar el error `SIN_RESPUESTA_SNMP`.
-- [ ] A5: timeouts de SNMP y HTTP; quitar `time.sleep(1)`.
-- [ ] A8: persistir el cambio de estado sólo si la notificación salió bien.
-- [ ] M2: imprimir desde el hilo principal.
-- [ ] Tests para cada uno de los puntos anteriores, con un cliente SNMP falso.
+| # | Paso | Tamaño | Depende de |
+| --- | --- | --- | --- |
+| ✅ | A1 — Métricas sin dato y `SIN_RESPUESTA_SNMP` | M | — |
+| ✅ 1 | Limpieza trivial (B2, B4, B10, comentarios residuales) | XS | — |
+| ✅ 2 | M1 — Eliminar seqlog, `logging` estándar | S | — |
+| ✅ 3 | A2 — Aislar drivers y código de salida | S | 2 |
+| 4 | M2 + M8 — Salida desde el hilo principal y control de futures | S | 3 |
+| 5 | A5 — Timeouts SNMP/HTTP | S | — |
+| 6 | A8 — No perder alertas si falla Google Chat | S | — |
+| 7 | B1 + B6 + B7 — Reestructura a `src/monitoreo_ups/` y entry point | M | 1–6 |
+| 8 | uv + `pyproject.toml` + `uv.lock` | S | 7 |
+| 9 | `ruff --fix` + `ruff format` (sólo formato) | S | 8 |
+| 10 | A7 — CI nuevo (ruff, pytest + cobertura, pip-audit; mypy no bloqueante) | M | 9 |
+| 11 | B5 — Type hints hasta que mypy pase; mypy pasa a bloquear | M | 10 |
+| 12 | A6 + M7 — Configuración y secretos por variables de entorno | M | 8 |
+| 13 | Docker (`Dockerfile`, `.dockerignore`, validar easysnmp — M9) | M | 12 |
+| 14 | Deploy automático (cron, Telegraf con `docker run`, corte) | M | 13 |
+| 15 | M5 — Modelo de la tabla de errores | M | 14 |
+| 16 | M4 — Contrato `BaseUPS` homogéneo | L | 14 |
+| 17 | M6 — Reglas de validación declarativas y alertas estructuradas | L | 16 |
+| 18 | M10 — Mensajes de Google Chat con tarjetas | M | 6, 15, 17 |
+| 19 | M3 — Alertas del UPS trifásico del DC | M | 16, 17 |
+| 20 | B8 — README y documentación final | S | todo |
 
-### Fase 1 — uv + pyproject + reestructura del paquete
+A3 y A4 quedaron cubiertos en su mayor parte por A1. Lo único pendiente es **probar el fallback de `OIDTNEW` contra un UPS real** cuando se despliegue A1. B3 (tests) no es un paso aparte: cada MR suma los tests de lo que cambia. B9 (nombres de las mediciones) queda fuera del plan hasta que se coordine con los dashboards.
 
-- [ ] Mover el código a `src/monitoreo_ups/`, el SQL a `schema.sql` dentro del paquete y renombrar `test/` a `tests/` (B1, B3).
-- [ ] `pyproject.toml` (§3.3), `uv.lock` y `.python-version`.
-- [ ] Entry point `monitoreo-ups` y `__main__.py`; `main.run()` devuelve un código de salida.
-- [ ] `ruff check --fix` + `ruff format` en un **commit aparte** (para no ensuciar el diff funcional).
-- [ ] Eliminar `scrip/`, `pytest.ini` y los shebangs; actualizar el Makefile y `.gitignore` (B2, B6, B7, B10).
+### Etapa 1 — Correcciones sobre el código actual
 
-### Fase 2 — CI
+Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rápido porque corrigen comportamientos que hoy afectan a producción.
 
-- [ ] Nuevo `.gitlab-ci.yml` (§4.2).
-- [ ] Type hints hasta que `mypy` pase (B5).
-- [ ] Fijar `fail_under` en la cobertura real y subirlo.
-- [ ] Proteger `main` y activar "Pipelines must succeed".
-- [ ] Pipeline programado semanal para `pip-audit`.
+- [x] **A1:** no publicar ni validar métricas sin dato; error `SIN_RESPUESTA_SNMP`.
+- [x] **1. Limpieza trivial:** borrar `scrip/` (B2), `== None` → `is None` (B4), `.gitignore` (B10) y el comentario `# ,'f2r9u1'`. Va primero porque no tiene riesgo y saca ruido de los diffs que siguen.
+- [x] **2. M1:** `logging` estándar; configurar el logger dentro del `__main__`; reescribir las llamadas con kwargs. Va antes que A2 porque simplifica su manejo de errores y elimina un `TypeError` latente.
+- [x] **3. A2:** `try/except` por driver (incluida la creación del cliente SNMP); código de salida 0 si al menos un driver terminó bien.
+- [ ] **4. M2 + M8:** los drivers devuelven sus líneas y `main` las imprime desde el hilo principal. La lectura del resultado de cada future ya quedó hecha en A2. Toca el mismo flujo que A2, por eso va justo después.
+- [ ] **5. A5:** `timeout`/`retries` en SNMP, cortar el host tras el primer timeout, timeout HTTP, quitar `time.sleep(1)` y `max_workers` configurable. Hace falta saber el `interval`/`timeout` actual de Telegraf.
+- [ ] **6. A8:** persistir el cambio de estado sólo si el envío fue exitoso; notificador nulo en lugar de `None`.
 
-### Fase 3 — Configuración externa + Docker
+### Etapa 2 — Herramientas
 
-- [ ] Rutas, comunidad SNMP, webhook, timeouts y nivel de log por variables de entorno (A6, M7).
-- [ ] M1: `uv remove seqlog`, `logging` estándar a stderr configurado dentro de `run()`, reescribir las llamadas con kwargs y borrar el código y la documentación de logging muertos.
-- [ ] `Dockerfile`, `.dockerignore` y `deploy/monitoreo.env.example`.
-- [ ] Validar que `easysnmp` compila en la imagen (M9); si no, migrar a `ezsnmp`.
-- [ ] Probar la imagen en la VM **en paralelo** al esquema actual: escribir a un bucket o measurement de prueba, con otra base SQLite y **sin webhook**, para no duplicar alertas.
+- [ ] **7. Reestructura del paquete:**
+  - Mover el código a `src/monitoreo_ups/`, el SQL a `schema.sql` y `test/` a `tests/` (B1).
+  - Entry point `monitoreo-ups` y `__main__.py` (B7).
+  - Makefile basado en uv (B6).
+  - Va **después** de la etapa 1 para no mover archivos mientras hay arreglos en curso, y **antes** de todo lo demás porque cambia todos los imports.
+- [ ] **8. uv:** `pyproject.toml` (§3.3), `uv.lock`, `.python-version`; borrar `pytest.ini`.
+- [ ] **9. Formato:** `ruff check --fix` + `ruff format` en un MR que **sólo** cambie formato, para que los refactors posteriores tengan diffs limpios.
+- [ ] **10. A7 — CI:** nuevo `.gitlab-ci.yml` (§4.2) con ruff, pytest + cobertura y pip-audit bloqueantes; mypy con `allow_failure: true` hasta el paso 11. Proteger `main`, activar "Pipelines must succeed" y programar el `pip-audit` semanal.
+- [ ] **11. B5:** type hints hasta que mypy pase y quitar el `allow_failure`. Va antes de los refactors grandes porque es cuando más ayuda.
 
-### Fase 4 — Deploy automático y corte
+### Etapa 3 — Despliegue automático
 
-- [ ] `deploy/actualizar.sh` y su instalación (§6.3).
-- [ ] Copiar `errores.db` al volumen, crear `/etc/monitoreo-ups/monitoreo.env` y agregar `telegraf` al grupo `docker`.
-- [ ] Cambiar el `[[inputs.exec]]` de Telegraf al `docker run` y verificar en Grafana que no haya huecos.
-- [ ] Hacer un cambio trivial en `main` y comprobar que se despliega solo en menos de 10 minutos.
-- [ ] Probar un rollback manual.
-- [ ] Retirar el clon viejo y las dependencias instaladas con `apt`.
+- [ ] **12. A6 + M7:** rutas (base de datos, logs), comunidad SNMP, webhook (renombrado a `GOOGLE_CHAT_WEBHOOK_URL`), timeouts y nivel de log por variables de entorno.
+- [ ] **13. Docker:**
+  - `Dockerfile`, `.dockerignore` y `deploy/monitoreo.env.example`.
+  - Validar que easysnmp compila (M9); si no, migrar a `ezsnmp` en este mismo paso.
+  - Probar la imagen en la VM **en paralelo** al esquema actual, con otra base, sin webhook y escribiendo a un measurement de prueba.
+- [ ] **14. Deploy:**
+  - `deploy/actualizar.sh` y su cron (§6).
+  - Copiar `errores.db` al volumen.
+  - Cambiar Telegraf al `docker run`.
+  - Comprobar que un cambio trivial en `main` se despliega solo.
+  - Probar un rollback y retirar el clon viejo.
 
-### Fase 5 — Mejoras de dominio
+  A partir de acá, cada MR mergeado llega solo a la VM.
 
-- [ ] M4: contrato `BaseUPS` homogéneo, con OIDs inyectados y `ejecutar()` sin argumentos.
-- [ ] M6: reglas de validación declarativas, mensajes formateados en el notificador y uso del `Enum` en lugar de strings.
-- [ ] M3: alertas para el UPS trifásico del DC.
-- [ ] M5: elegir el modelo de la tabla (estado o historial), `UNIQUE`, WAL y cierre de conexiones.
-- [ ] M8: control de los futures.
-- [ ] B8: reescribir el README y actualizar `docs/arqui/` y `docs/logger/`.
+### Etapa 4 — Mejoras de dominio
+
+- [ ] **15. M5:** decidir si la tabla guarda estado o historial; `UNIQUE`/UPSERT, índice, WAL, cierre de conexiones. Opcional: exigir varias fallas seguidas antes de avisar `SIN_RESPUESTA_SNMP`. Va antes que M10 porque la duración de los incidentes sale de esta tabla.
+- [ ] **16. M4:** `BaseUPS` homogéneo, con OIDs inyectados y `ejecutar()` sin argumentos.
+- [ ] **17. M6:** reglas de validación declarativas con umbrales inyectados; el dominio devuelve objetos `Alerta` sin formato; usar el `Enum` en lugar de strings.
+- [ ] **18. M10:** `FormateadorGoogleChat` con tarjetas, umbral, duración, botón a Grafana e hilos por equipo.
+- [ ] **19. M3:** alertas para el UPS trifásico del DC, reutilizando las reglas (M6) y el formateador (M10). Incluye el aviso `SIN_RESPUESTA_SNMP` para el DC.
+- [ ] **20. B8:** reescribir el README y actualizar `docs/arqui/` y `docs/logger/`.
 
 ---
 
@@ -987,3 +1101,4 @@ Cada fase es un MR independiente, en este orden. Las fases 1 y 2 se pueden hacer
 4. ¿La tabla `errores` se quiere como estado actual o como historial de incidentes? (M5)
 5. ¿Qué umbrales corresponden al UPS trifásico del DC? (M3)
 6. ¿Algún UPS tiene firmware viejo que use `OIDTNEW`? Sirve para probar A4 contra un equipo real.
+7. ¿Qué URL tiene el dashboard de Grafana de los UPS, y con qué variable filtra por host? (M10)
