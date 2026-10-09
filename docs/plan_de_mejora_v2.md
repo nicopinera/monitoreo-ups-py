@@ -43,11 +43,11 @@ Telegraf (VM) ──exec cada X s──▶ python3 src/main.py (repo clonado en 
 
 **Estado del código verificado en esta revisión:**
 
-| Verificación | Resultado |
-| --- | --- |
-| `pytest` (local) | 17 tests pasan; sólo cubren `core/validacion.py` y `infraestructura/database.py`. `test_main.py` es un placeholder (`assert 5==5`). |
-| `ruff check` (reglas E, F, W, B, UP, SIM, PL) | 188 hallazgos, 92 autocorregibles (`F403/F405` por `import *`, `E711` por `== None`, imports sin usar, etc.). |
-| CI (`.gitlab-ci.yml`) | Probablemente nunca corrió los tests (ver [A7](#a7-el-ci-no-ejecuta-realmente-los-tests)). |
+| Verificación                                  | Resultado                                                                                                                           |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `pytest` (local)                              | 17 tests pasan; sólo cubren `core/validacion.py` y `infraestructura/database.py`. `test_main.py` es un placeholder (`assert 5==5`). |
+| `ruff check` (reglas E, F, W, B, UP, SIM, PL) | 188 hallazgos, 92 autocorregibles (`F403/F405` por `import *`, `E711` por `== None`, imports sin usar, etc.).                       |
+| CI (`.gitlab-ci.yml`)                         | Probablemente nunca corrió los tests (ver [A7](#a7-el-ci-no-ejecuta-realmente-los-tests)).                                          |
 
 ---
 
@@ -55,26 +55,26 @@ Telegraf (VM) ──exec cada X s──▶ python3 src/main.py (repo clonado en 
 
 ### 2.1 Resumen priorizado
 
-| ID | Prioridad | Problema | Archivo |
-| --- | --- | --- | --- |
-| [A1](#a1-si-falla-snmp-se-publican-ceros-y-se-disparan-alertas-falsas) | Alta | Si falla SNMP, se publican ceros y se disparan alertas falsas | [state_ups.py](../src/drivers/state_ups.py#L17-L40), [dc_ups.py](../src/drivers/dc_ups.py#L24) |
-| [A2](#a2-un-error-en-el-ups-del-dc-o-en-humedad-aborta-todo-el-monitoreo) | Alta | Un error en el UPS del DC o en humedad aborta todo el monitoreo | [main.py](../src/main.py#L50-L51) |
-| [A3](#a3-valores-no-numéricos-rompen-el-line-protocol) | Alta | Valores no numéricos rompen el line protocol | [state_ups.py](../src/drivers/state_ups.py#L33), [hum_ups.py](../src/drivers/hum_ups.py#L11) |
-| [A4](#a4-el-fallback-oidt--oidtnew-no-funciona-en-todos-los-casos) | Alta | El fallback `OIDT → OIDTNEW` no funciona en todos los casos | [state_ups.py](../src/drivers/state_ups.py#L37-L40) |
-| [A5](#a5-no-hay-timeouts-acotados-snmp-y-google-chat) | Alta | No hay timeouts acotados (SNMP y Google Chat) | [snmp_client.py](../src/infraestructura/snmp_client.py#L8), [notificador.py](../src/infraestructura/notificador.py#L24-L26) |
-| [A6](#a6-el-estado-y-los-secretos-viven-dentro-del-repo) | Alta | El estado (SQLite) y los secretos (`.env`) viven dentro del repo | [configuracion.py](../src/config/configuracion.py#L90-L93) |
-| [A7](#a7-el-ci-no-ejecuta-realmente-los-tests) | Alta | El CI no ejecuta realmente los tests | [.gitlab-ci.yml](../.gitlab-ci.yml#L14-L18) |
-| [A8](#a8-si-falla-el-envío-a-google-chat-la-alerta-se-pierde-para-siempre) | Alta | Si falla el envío a Google Chat, la alerta se pierde para siempre | [state_ups.py](../src/drivers/state_ups.py#L50-L64) |
-| [M1](#m1-eliminar-seqlog-y-pasar-a-logging-estándar) | Media | Eliminar seqlog y pasar a `logging` estándar a stderr | [logger.py](../src/infraestructura/logger.py) |
-| [M2](#m2-salida-a-stdout-desde-varios-hilos) | Media | Varios hilos escriben a stdout a la vez | [state_ups.py](../src/drivers/state_ups.py#L105) |
-| [M3](#m3-el-ups-trifásico-del-dc-no-tiene-alertas) | Media | El UPS trifásico del DC no tiene alertas | [dc_ups.py](../src/drivers/dc_ups.py#L41-L43) |
-| [M4](#m4-el-contrato-baseups-no-se-respeta) | Media | El contrato `BaseUPS` no se respeta | [ups_base.py](../src/core/ups_base.py) |
-| [M5](#m5-modelo-de-datos-de-sqlite) | Media | Modelo de datos de SQLite y manejo de conexiones | [database.py](../src/infraestructura/database.py) |
-| [M6](#m6-dominio-acoplado-a-la-presentación-y-a-strings-mágicos) | Media | Dominio acoplado a la presentación y a strings mágicos | [validacion.py](../src/core/validacion.py), [state_ups.py](../src/drivers/state_ups.py#L70-L94) |
-| [M7](#m7-configuración-y-secretos-hardcodeados) | Media | Configuración y secretos en el código | [configuracion.py](../src/config/configuracion.py) |
-| [M8](#m8-threadpoolexecutor-sin-control-de-resultados) | Media | `ThreadPoolExecutor` sin control de resultados | [main.py](../src/main.py#L53-L55) |
-| [M9](#m9-easysnmp-sin-mantenimiento) | Media | `easysnmp` sin mantenimiento | — |
-| [B1–B10](#24-prioridad-baja--deuda-técnica) | Baja | Estilo, layout del paquete, tests, documentación desactualizada | varios |
+| ID                                                                         | Prioridad | Problema                                                          | Archivo                                                                                                                     |
+| -------------------------------------------------------------------------- | --------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [A1](#a1-si-falla-snmp-se-publican-ceros-y-se-disparan-alertas-falsas)     | Alta      | Si falla SNMP, se publican ceros y se disparan alertas falsas     | [state_ups.py](../src/drivers/state_ups.py#L17-L40), [dc_ups.py](../src/drivers/dc_ups.py#L24)                              |
+| [A2](#a2-un-error-en-el-ups-del-dc-o-en-humedad-aborta-todo-el-monitoreo)  | Alta      | Un error en el UPS del DC o en humedad aborta todo el monitoreo   | [main.py](../src/main.py#L50-L51)                                                                                           |
+| [A3](#a3-valores-no-numéricos-rompen-el-line-protocol)                     | Alta      | Valores no numéricos rompen el line protocol                      | [state_ups.py](../src/drivers/state_ups.py#L33), [hum_ups.py](../src/drivers/hum_ups.py#L11)                                |
+| [A4](#a4-el-fallback-oidt--oidtnew-no-funciona-en-todos-los-casos)         | Alta      | El fallback `OIDT → OIDTNEW` no funciona en todos los casos       | [state_ups.py](../src/drivers/state_ups.py#L37-L40)                                                                         |
+| [A5](#a5-no-hay-timeouts-acotados-snmp-y-google-chat)                      | Alta      | No hay timeouts acotados (SNMP y Google Chat)                     | [snmp_client.py](../src/infraestructura/snmp_client.py#L8), [notificador.py](../src/infraestructura/notificador.py#L24-L26) |
+| [A6](#a6-el-estado-y-los-secretos-viven-dentro-del-repo)                   | Alta      | El estado (SQLite) y los secretos (`.env`) viven dentro del repo  | [configuracion.py](../src/config/configuracion.py#L90-L93)                                                                  |
+| [A7](#a7-el-ci-no-ejecuta-realmente-los-tests)                             | Alta      | El CI no ejecuta realmente los tests                              | [.gitlab-ci.yml](../.gitlab-ci.yml#L14-L18)                                                                                 |
+| [A8](#a8-si-falla-el-envío-a-google-chat-la-alerta-se-pierde-para-siempre) | Alta      | Si falla el envío a Google Chat, la alerta se pierde para siempre | [state_ups.py](../src/drivers/state_ups.py#L50-L64)                                                                         |
+| [M1](#m1-eliminar-seqlog-y-pasar-a-logging-estándar)                       | Media     | Eliminar seqlog y pasar a `logging` estándar a stderr             | [logger.py](../src/infraestructura/logger.py)                                                                               |
+| [M2](#m2-salida-a-stdout-desde-varios-hilos)                               | Media     | Varios hilos escriben a stdout a la vez                           | [state_ups.py](../src/drivers/state_ups.py#L105)                                                                            |
+| [M3](#m3-el-ups-trifásico-del-dc-no-tiene-alertas)                         | Media     | El UPS trifásico del DC no tiene alertas                          | [dc_ups.py](../src/drivers/dc_ups.py#L41-L43)                                                                               |
+| [M4](#m4-el-contrato-baseups-no-se-respeta)                                | Media     | El contrato `BaseUPS` no se respeta                               | [ups_base.py](../src/core/ups_base.py)                                                                                      |
+| [M5](#m5-modelo-de-datos-de-sqlite)                                        | Media     | Modelo de datos de SQLite y manejo de conexiones                  | [database.py](../src/infraestructura/database.py)                                                                           |
+| [M6](#m6-dominio-acoplado-a-la-presentación-y-a-strings-mágicos)           | Media     | Dominio acoplado a la presentación y a strings mágicos            | [validacion.py](../src/core/validacion.py), [state_ups.py](../src/drivers/state_ups.py#L70-L94)                             |
+| [M7](#m7-configuración-y-secretos-hardcodeados)                            | Media     | Configuración y secretos en el código                             | [configuracion.py](../src/config/configuracion.py)                                                                          |
+| [M8](#m8-threadpoolexecutor-sin-control-de-resultados)                     | Media     | `ThreadPoolExecutor` sin control de resultados                    | [main.py](../src/main.py#L53-L55)                                                                                           |
+| [M9](#m9-easysnmp-sin-mantenimiento)                                       | Media     | `easysnmp` sin mantenimiento                                      | —                                                                                                                           |
+| [B1–B10](#24-prioridad-baja--deuda-técnica)                                | Baja      | Estilo, layout del paquete, tests, documentación desactualizada   | varios                                                                                                                      |
 
 ### 2.2 Prioridad alta
 
@@ -318,18 +318,18 @@ Los `Future` de `executor.submit` se descartan: cualquier excepción que escape 
 
 ### 2.4 Prioridad baja / deuda técnica
 
-| ID | Problema | Propuesta |
-| --- | --- | --- |
-| B1 | Los paquetes de primer nivel se llaman `config`, `core`, `drivers` e `infraestructura`: nombres genéricos que pueden chocar con otras librerías. Los tests importan `src.core...` mientras el código importa `core...`, así que el mismo módulo se carga dos veces con nombres distintos. | Reestructurar como `src/monitoreo_ups/{config,core,drivers,infraestructura}` y usar imports absolutos `monitoreo_ups.…` (ver §3). |
-| B2 | La carpeta [scrip/](../scrip/) tiene pruebas sueltas (`loggerv1.py` está vacío). | Eliminarla. |
-| B3 | [test_main.py](../test/test_main.py) es un placeholder. No hay tests de drivers, notificador, cliente SNMP ni del flujo de `main`. | Tests de drivers con un `ClienteSNMP` falso (fake), del notificador con `responses`/mocks y del formateo de line protocol. Renombrar `test/` a `tests/`. |
-| B4 | Las comparaciones `== None` / `!= None` aparecen en [hum_ups.py:15](../src/drivers/hum_ups.py#L15) y en los tests. | `is None` (`ruff --fix`). |
-| B5 | Faltan type hints en todo el proyecto. | Agregarlos de forma progresiva, con `mypy` en el CI (§4). |
-| B6 | El [Makefile](../Makefile) instala con `sudo apt`, `run_hum` y `run_state` son idénticos. | Reemplazarlo por objetivos basados en `uv`: `make lint`, `make test`, `make build`, `make run`. |
-| B7 | Los shebangs `#!/usr/bin/python3` en todos los módulos y el `chmod +x` del Makefile ya no hacen falta. | Usar el entry point `monitoreo-ups` del `pyproject.toml`. |
-| B8 | El [README.md](../README.md) describe una estructura vieja (`humedad_ups/`, `state_ups/`, `Sesiones.py`, `borrar_si_vieja()`) que ya no existe. Dice "decisegundos" para `life`, pero la división por 6000 corresponde a TimeTicks (centésimas de segundo). | Reescribirlo: qué hace, cómo correrlo con `uv`, cómo se despliega y un enlace a [docs/arqui/arquitectura_y_uso.md](arqui/arquitectura_y_uso.md). |
-| B9 | Los nombres de las mediciones no son consistentes: humedad y estado comparten `ups_temp2` y el DC usa `dc-ups`. | **No cambiarlos todavía**, porque romperían los dashboards de Grafana. Documentarlos y, si se cambian, hacerlo de forma coordinada. |
-| B10 | `.gitignore` no contempla `.venv/`, `.mypy_cache/`, `.ruff_cache/`, `coverage.xml` ni `htmlcov/`. | Agregarlos. |
+| ID  | Problema                                                                                                                                                                                                                                                                                  | Propuesta                                                                                                                                                |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B1  | Los paquetes de primer nivel se llaman `config`, `core`, `drivers` e `infraestructura`: nombres genéricos que pueden chocar con otras librerías. Los tests importan `src.core...` mientras el código importa `core...`, así que el mismo módulo se carga dos veces con nombres distintos. | Reestructurar como `src/monitoreo_ups/{config,core,drivers,infraestructura}` y usar imports absolutos `monitoreo_ups.…` (ver §3).                        |
+| B2  | La carpeta [scrip/](../scrip/) tiene pruebas sueltas (`loggerv1.py` está vacío).                                                                                                                                                                                                          | Eliminarla.                                                                                                                                              |
+| B3  | [test_main.py](../test/test_main.py) es un placeholder. No hay tests de drivers, notificador, cliente SNMP ni del flujo de `main`.                                                                                                                                                        | Tests de drivers con un `ClienteSNMP` falso (fake), del notificador con `responses`/mocks y del formateo de line protocol. Renombrar `test/` a `tests/`. |
+| B4  | Las comparaciones `== None` / `!= None` aparecen en [hum_ups.py:15](../src/drivers/hum_ups.py#L15) y en los tests.                                                                                                                                                                        | `is None` (`ruff --fix`).                                                                                                                                |
+| B5  | Faltan type hints en todo el proyecto.                                                                                                                                                                                                                                                    | Agregarlos de forma progresiva, con `mypy` en el CI (§4).                                                                                                |
+| B6  | El [Makefile](../Makefile) instala con `sudo apt`, `run_hum` y `run_state` son idénticos.                                                                                                                                                                                                 | Reemplazarlo por objetivos basados en `uv`: `make lint`, `make test`, `make build`, `make run`.                                                          |
+| B7  | Los shebangs `#!/usr/bin/python3` en todos los módulos y el `chmod +x` del Makefile ya no hacen falta.                                                                                                                                                                                    | Usar el entry point `monitoreo-ups` del `pyproject.toml`.                                                                                                |
+| B8  | El [README.md](../README.md) describe una estructura vieja (`humedad_ups/`, `state_ups/`, `Sesiones.py`, `borrar_si_vieja()`) que ya no existe. Dice "decisegundos" para `life`, pero la división por 6000 corresponde a TimeTicks (centésimas de segundo).                               | Reescribirlo: qué hace, cómo correrlo con `uv`, cómo se despliega y un enlace a [docs/arqui/arquitectura_y_uso.md](arqui/arquitectura_y_uso.md).         |
+| B9  | Los nombres de las mediciones no son consistentes: humedad y estado comparten `ups_temp2` y el DC usa `dc-ups`.                                                                                                                                                                           | **No cambiarlos todavía**, porque romperían los dashboards de Grafana. Documentarlos y, si se cambian, hacerlo de forma coordinada.                      |
+| B10 | `.gitignore` no contempla `.venv/`, `.mypy_cache/`, `.ruff_cache/`, `coverage.xml` ni `htmlcov/`.                                                                                                                                                                                         | Agregarlos.                                                                                                                                              |
 
 ---
 
@@ -517,13 +517,13 @@ Notas:
 
 ### 4.1 Objetivos
 
-| Etapa | Herramienta | Bloquea el merge |
-| --- | --- | --- |
-| Lint y formato | `ruff check` + `ruff format --check` | Sí |
-| Tipado | `mypy` | Sí |
-| Tests y cobertura | `pytest` + `pytest-cov` (`fail_under`) | Sí |
-| Vulnerabilidades en dependencias | `pip-audit` sobre el lock exportado | Sí |
-| Build de la imagen | `docker build` (sin push, no hay registry) | Sí, si el runner lo permite |
+| Etapa                            | Herramienta                                | Bloquea el merge            |
+| -------------------------------- | ------------------------------------------ | --------------------------- |
+| Lint y formato                   | `ruff check` + `ruff format --check`       | Sí                          |
+| Tipado                           | `mypy`                                     | Sí                          |
+| Tests y cobertura                | `pytest` + `pytest-cov` (`fail_under`)     | Sí                          |
+| Vulnerabilidades en dependencias | `pip-audit` sobre el lock exportado        | Sí                          |
+| Build de la imagen               | `docker build` (sin push, no hay registry) | Sí, si el runner lo permite |
 
 Configuración en GitLab:
 
@@ -541,11 +541,11 @@ stages:
   - build
 
 variables:
-  UV_VERSION: "0.9"              # fijar a una versión exacta
+  UV_VERSION: "0.9" # fijar a una versión exacta
   PYTHON_IMAGE: "python:3.12-slim-bookworm"
   UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
   UV_LINK_MODE: "copy"
-  UV_FROZEN: "1"                 # usar exactamente uv.lock
+  UV_FROZEN: "1" # usar exactamente uv.lock
 
 workflow:
   rules:
@@ -800,7 +800,7 @@ cron (cada 5 min)
 
 Si el build o el smoke test fallan, `:prod` sigue apuntando a la imagen anterior y **el monitoreo no se interrumpe**.
 
-> Aclaración: el comando es `docker image prune`; `docker image purge` no existe. `prune -f` borra sólo las imágenes *dangling* (sin tag), que son las que deja cada rebuild. Los tags viejos se borran a propósito en el script, y el caché de build se limpia aparte con `docker builder prune`.
+> Aclaración: el comando es `docker image prune`; `docker image purge` no existe. `prune -f` borra sólo las imágenes _dangling_ (sin tag), que son las que deja cada rebuild. Los tags viejos se borran a propósito en el script, y el caché de build se limpia aparte con `docker builder prune`.
 
 ### 6.2 `deploy/actualizar.sh` propuesto
 
