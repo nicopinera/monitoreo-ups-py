@@ -11,7 +11,6 @@ from core.validacion import (
     validar_tiempo_autonomia,
 )
 from datetime import datetime
-import logging
 
 # Orden de los campos en la linea de telegraf
 CAMPOS_TELEGRAF = ("battery", "temp", "capacity", "load", "life", "current")
@@ -19,7 +18,6 @@ CAMPOS_TELEGRAF = ("battery", "temp", "capacity", "load", "life", "current")
 class StateUPS(BaseUPS):
     def __init__(self, hostname, clienteSNMP, notificador=None, rep_db=None):
         super().__init__(hostname, clienteSNMP, notificador, rep_db)
-        self.logger = logging.getLogger(__name__)
 
     def obtener_datos(self, oid_dicc,oidtemp,oidtemp2):
         """Cada driver debe saber que OID pedir. Las metricas sin dato quedan en None."""
@@ -122,9 +120,7 @@ class StateUPS(BaseUPS):
             print(f"ups_temp2,host={self.hostname} {campos}")
     
     def ejecutar(self,oid_dicc,oidtemp,oidtemp2):
-        try:
-            self.obtener_datos(oid_dicc,oidtemp,oidtemp2)
-            self.imprimir_telegraf()
-            self.validar_datos_y_notificar()
-        except Exception:
-            self.logger.exception("Error al ejecutar StateUPS para %s", self.hostname)
+        """Las excepciones no se atrapan aca: main las registra y sigue con el resto de los UPS."""
+        self.obtener_datos(oid_dicc,oidtemp,oidtemp2)
+        self.imprimir_telegraf()
+        self.validar_datos_y_notificar()

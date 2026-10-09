@@ -2,7 +2,9 @@
 
 import config.configuracion as c
 import logging
+import sys
 import warnings
+from functools import partial
 from infraestructura.logger import configurar_logger
 from infraestructura.notificador import Notificador
 from infraestructura.snmp_client import ClienteSNMP
@@ -14,50 +16,100 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
+MAX_WORKERS = 6
+
+
+def _tarea_humedad():
+    cliente = ClienteSNMP(c.HOST_NAME_HUMEDAD)
+    HumedadUPS(hostname=c.HOST_NAME_HUMEDAD, clienteSNMP=cliente).ejecutar(c.OID_HUMEDAD)
+
+
+def _tarea_dc():
+    cliente = ClienteSNMP(c.HOST_NAME_DC)
+    DataCenterUPS(c.HOST_NAME_DC, clienteSNMP=cliente).ejecutar(c.OID_DC)
+
+
+def _tarea_state(host, notificador, repo_db):
+    cliente = ClienteSNMP(host)
+    StateUPS(hostname=host, clienteSNMP=cliente, notificador=notificador, rep_db=repo_db).ejecutar(c.OID_UPS, c.OIDT, c.OIDTNEW)
+
+
+def crear_tareas(notificador, repo_db):
+    """
+    Arma las tareas a ejecutar como listas de (nombre, funcion).
+    Cada tarea crea su propio cliente SNMP, asi un host que falla al crear la sesion
+    (por ejemplo un nombre que no resuelve DNS) solo afecta a ese host.
+
+    Devuelve (tareas_secuenciales, tareas_paralelas).
+    """
+    tareas_secuenciales = [
+        (f"humedad {c.HOST_NAME_HUMEDAD}", _tarea_humedad),
+        (f"DC {c.HOST_NAME_DC}", _tarea_dc),
+    ]
+    tareas_paralelas = [
+        (f"state {host}", partial(_tarea_state, host, notificador, repo_db))
+        for host in c.HOST_NAME_STATE
+    ]
+    return tareas_secuenciales, tareas_paralelas
+
+
+def _ejecutar_protegido(nombre, tarea):
+    """
+    Ejecuta una tarea. Si lanza una excepcion la registra (con traceback) y devuelve False,
+    asi un driver que falla no frena a los demas.
+    """
+    try:
+        tarea()
+        return True
+    except Exception:
+        logger.exception("Error al ejecutar %s", nombre)
+        return False
+
+
+def ejecutar_tareas(tareas_secuenciales, tareas_paralelas, max_workers=MAX_WORKERS):
+    """
+    Ejecuta primero las tareas secuenciales y despues las paralelas en un pool de hilos.
+    Devuelve una lista con True/False por tarea (True = termino sin excepcion).
+    """
+    resultados = [_ejecutar_protegido(nombre, tarea) for nombre, tarea in tareas_secuenciales]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_ejecutar_protegido, nombre, tarea) for nombre, tarea in tareas_paralelas]
+    resultados += [future.result() for future in futures]
+
+    return resultados
+
 
 def main():
+    """
+    Devuelve el codigo de salida del proceso:
+    - 0 si al menos una tarea termino bien (telegraf toma las metricas que se imprimieron).
+    - 1 si fallaron todas (no hay metricas y el error queda visible en el log de telegraf).
+    Un UPS que no responde SNMP no cuenta como falla: es un caso manejado (SIN_RESPUESTA_SNMP).
+    """
     logger.info("Iniciando monitoreo UPS")
-    
-    # Creacion de clientes SNMP para host de state
-    cliente_snmp_state = []
-    for h in c.HOST_NAME_STATE:
-        aux_client = ClienteSNMP(h)
-        cliente_snmp_state.append(aux_client)
-    
-    # Creacion de cliente snmp del DC
-    cliente_snmp_dc = ClienteSNMP(c.HOST_NAME_DC)
-    
-    # Creacion de cliente SNMP para humedad
-    cliente_snmp_humedad = ClienteSNMP(c.HOST_NAME_HUMEDAD)
-    
-    # Notificador
+
+    # Infraestructura compartida: si falla es un error fatal (configuracion local rota)
     notificador = Notificador(c.ARCHIVO_ENV)
-    
-    # Repositorio de base de datos
     repo_db = RepositorioDB(c.ARCHIVO_DB)
-    
-    driver_state = []
-    for host,client in zip(c.HOST_NAME_STATE,cliente_snmp_state):
-        aux_drive_state = StateUPS(hostname=host,clienteSNMP=client,notificador=notificador,rep_db=repo_db)
-        driver_state.append(aux_drive_state)
-    
-    dc_driver = DataCenterUPS(c.HOST_NAME_DC,clienteSNMP=cliente_snmp_dc)
-    
-    humedad_driver = HumedadUPS(hostname=c.HOST_NAME_HUMEDAD,clienteSNMP=cliente_snmp_humedad)
-    
-    humedad_driver.ejecutar(c.OID_HUMEDAD)
-    dc_driver.ejecutar(c.OID_DC)
-    
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        for d in driver_state:
-            executor.submit(d.ejecutar,c.OID_UPS,c.OIDT,c.OIDTNEW)
-            
+
+    tareas_secuenciales, tareas_paralelas = crear_tareas(notificador, repo_db)
+    resultados = ejecutar_tareas(tareas_secuenciales, tareas_paralelas)
+
+    fallidas = resultados.count(False)
+    if fallidas:
+        logger.warning("Fallaron %d de %d tareas", fallidas, len(resultados))
+    return 0 if fallidas < len(resultados) else 1
+
+
 if __name__== "__main__":
     # Se configura recien al ejecutar, asi importar main (por ejemplo en los tests) no tiene efectos secundarios
     warnings.filterwarnings("ignore", category=UserWarning)
     configurar_logger()
     try:
-        main()
+        codigo_salida = main()
     except Exception:
+        # El traceback ya queda en el log (archivo + stderr), no hace falta relanzar la excepcion
         logger.exception("Error fatal en el flujo principal")
-        raise
+        codigo_salida = 1
+    sys.exit(codigo_salida)
