@@ -112,3 +112,17 @@ def test_agente_que_responde_todo_nosuch_cuenta_como_sin_respuesta(capsys, notif
 
     assert capsys.readouterr().out == ""
     assert Errores.SIN_RESPUESTA_SNMP.name in notificador.mensajes[0]
+
+
+class ClienteQueExplota(ClienteSNMPFalso):
+    def obtener_valor_numerico(self, oid):
+        raise RuntimeError("error inesperado")
+
+
+def test_excepcion_inesperada_se_registra_sin_romper(caplog, notificador, repo_db):
+    driver = StateUPS(HOST, ClienteQueExplota(), notificador=notificador, rep_db=repo_db)
+
+    driver.ejecutar(c.OID_UPS, c.OIDT, c.OIDTNEW)  # no debe propagar la excepcion
+
+    assert f"Error al ejecutar StateUPS para {HOST}" in caplog.text
+    assert "error inesperado" in caplog.text  # el traceback queda en el log
