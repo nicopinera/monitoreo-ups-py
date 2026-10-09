@@ -1,3 +1,4 @@
+import pytest
 import config.configuracion as c
 from core.errores import Errores
 from drivers.state_ups import StateUPS
@@ -119,10 +120,9 @@ class ClienteQueExplota(ClienteSNMPFalso):
         raise RuntimeError("error inesperado")
 
 
-def test_excepcion_inesperada_se_registra_sin_romper(caplog, notificador, repo_db):
+def test_excepcion_inesperada_se_propaga_a_main(notificador, repo_db):
+    # El driver no atrapa excepciones: las registra main (ver test_main.py) y sigue con el resto
     driver = StateUPS(HOST, ClienteQueExplota(), notificador=notificador, rep_db=repo_db)
 
-    driver.ejecutar(c.OID_UPS, c.OIDT, c.OIDTNEW)  # no debe propagar la excepcion
-
-    assert f"Error al ejecutar StateUPS para {HOST}" in caplog.text
-    assert "error inesperado" in caplog.text  # el traceback queda en el log
+    with pytest.raises(RuntimeError, match="error inesperado"):
+        driver.ejecutar(c.OID_UPS, c.OIDT, c.OIDTNEW)
