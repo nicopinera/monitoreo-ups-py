@@ -76,3 +76,16 @@ def validar_tiempo_autonomia(valor):
         msg = f"[ADVERTENCIA] *{error.name}*: Valor actual *{valor} [min]*"
         return error,msg
     return None,None
+
+def validar_respuesta_snmp(hay_datos):
+    """
+    Valida que el equipo haya respondido al menos una consulta SNMP, si no respondio
+    ninguna genera tanto el error, como el mensaje de notificacion para el chat de google
+
+    :param hay_datos: True si se obtuvo al menos un valor del equipo
+    """
+    if not hay_datos:
+        error = Errores.SIN_RESPUESTA_SNMP
+        msg = f"[ADVERTENCIA] *{error.name}*: El equipo no respondió a ninguna consulta SNMP"
+        return error,msg
+    return None,None

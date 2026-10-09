@@ -29,3 +29,10 @@ class BaseUPS(ABC):
     @abstractmethod
     def ejecutar(self):
         pass
+
+    def _formatear_campos(self, campos):
+        """
+        Arma los campos de una linea de telegraf ("a=1,b=2") omitiendo los que no tienen dato.
+        Devuelve "" si ninguno tiene dato (una linea sin campos es invalida en line protocol).
+        """
+        return ",".join(f"{campo}={self.datos[campo]}" for campo in campos if self.datos.get(campo) is not None)

@@ -9,3 +9,4 @@ class Errores(Enum):
     CARGA_MINIMA = 4
     LOAD_MAXIMO = 5
     AUTONOMIA_MINIMO = 6
+    SIN_RESPUESTA_SNMP = 7 # Ningun OID del equipo devolvio un valor numerico
