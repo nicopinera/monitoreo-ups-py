@@ -2,6 +2,7 @@ import logging
 
 import pytest
 from easysnmp import EasySNMPTimeoutError
+
 from infraestructura.snmp_client import ClienteSNMP
 from test.conftest import ClienteSNMPFalso
 
@@ -14,7 +15,7 @@ OID = "1.2.3"
         ("27", 27),
         ("-1", -1),
         ("12.5", 12.5),
-        (None, None),             # timeout / error SNMP
+        (None, None),  # timeout / error SNMP
         ("NOSUCHOBJECT", None),
         ("NOSUCHINSTANCE", None),
         ("", None),
@@ -35,6 +36,7 @@ def test_entero_se_mantiene_como_int():
 
 class SesionFalsa:
     """Reemplazo de easysnmp.Session cuyo get lanza la excepcion indicada."""
+
     def __init__(self, excepcion):
         self.excepcion = excepcion
 

@@ -1,18 +1,19 @@
 #!/usr/bin/python3
 
-import config.configuracion as c
 import logging
 import sys
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+
+import config.configuracion as c
+from drivers.dc_ups import DataCenterUPS
+from drivers.hum_ups import HumedadUPS
+from drivers.state_ups import StateUPS
+from infraestructura.database import RepositorioDB
 from infraestructura.logger import configurar_logger
 from infraestructura.notificador import Notificador
 from infraestructura.snmp_client import ClienteSNMP
-from infraestructura.database import RepositorioDB
-from drivers.state_ups import StateUPS
-from drivers.dc_ups import DataCenterUPS
-from drivers.hum_ups import HumedadUPS
-from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,9 @@ def _tarea_dc():
 
 def _tarea_state(host, notificador, repo_db):
     cliente = ClienteSNMP(host)
-    StateUPS(hostname=host, clienteSNMP=cliente, notificador=notificador, rep_db=repo_db).ejecutar(c.OID_UPS, c.OIDT, c.OIDTNEW)
+    StateUPS(hostname=host, clienteSNMP=cliente, notificador=notificador, rep_db=repo_db).ejecutar(
+        c.OID_UPS, c.OIDT, c.OIDTNEW
+    )
 
 
 def crear_tareas(notificador, repo_db):
@@ -74,7 +77,10 @@ def ejecutar_tareas(tareas_secuenciales, tareas_paralelas, max_workers=MAX_WORKE
     resultados = [_ejecutar_protegido(nombre, tarea) for nombre, tarea in tareas_secuenciales]
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_ejecutar_protegido, nombre, tarea) for nombre, tarea in tareas_paralelas]
+        futures = [
+            executor.submit(_ejecutar_protegido, nombre, tarea)
+            for nombre, tarea in tareas_paralelas
+        ]
     resultados += [future.result() for future in futures]
 
     return resultados
@@ -102,7 +108,7 @@ def main():
     return 0 if fallidas < len(resultados) else 1
 
 
-if __name__== "__main__":
+if __name__ == "__main__":
     # Se configura recien al ejecutar, asi importar main (por ejemplo en los tests) no tiene efectos secundarios
     warnings.filterwarnings("ignore", category=UserWarning)
     configurar_logger()

@@ -57,7 +57,7 @@ Si mañana necesitas monitorear un nuevo modelo de UPS, solo sigue estos 3 pasos
 En `src/config/configuracion.py`, agrega un diccionario con los OIDs del nuevo equipo.
 
 ```python
-NUEVA_UPS_OIDS = { "voltaje": "1.3.6.1...", "carga": "1.3.6.1..." }
+NUEVA_UPS_OIDS = {"voltaje": "1.3.6.1...", "carga": "1.3.6.1..."}
 ```
 
 ### Paso 2: Crea el Driver
@@ -71,7 +71,7 @@ En `src/main.py`, agrega la instancia a la lista de ejecución:
 ```python
 mis_ups = [
     StateUPS("ups-central", snmp, notifier, db),
-    NuevoModeloUPS("ups-nueva", snmp, notifier, db)
+    NuevoModeloUPS("ups-nueva", snmp, notifier, db),
 ]
 ```
 

@@ -1,4 +1,5 @@
 import pytest
+
 from infraestructura.database import RepositorioDB
 from infraestructura.snmp_client import ClienteSNMP
 
@@ -9,6 +10,7 @@ class ClienteSNMPFalso(ClienteSNMP):
     Un OID que no esta en el diccionario se comporta como timeout (None).
     Hereda obtener_valor_numerico para testear la conversion real.
     """
+
     def __init__(self, respuestas=None):
         self.respuestas = respuestas or {}
 
@@ -18,6 +20,7 @@ class ClienteSNMPFalso(ClienteSNMP):
 
 class NotificadorFalso:
     """Guarda los mensajes en lugar de enviarlos a Google Chat."""
+
     def __init__(self):
         self.mensajes = []
 
