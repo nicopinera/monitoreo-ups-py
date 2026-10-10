@@ -1,5 +1,12 @@
-from src.core.errores import Errores
-from src.core.validacion import *
+from core.errores import Errores
+from core.validacion import (
+    validar_carga,
+    validar_load,
+    validar_respuesta_snmp,
+    validar_temp_bateria,
+    validar_temp_uio,
+    validar_tiempo_autonomia,
+)
 
 
 def test_validar_temp_bateria_ok():

@@ -1,7 +1,8 @@
 import sqlite3
 
 import pytest
-from src.infraestructura.database import RepositorioDB
+
+from infraestructura.database import RepositorioDB
 
 
 @pytest.fixture
