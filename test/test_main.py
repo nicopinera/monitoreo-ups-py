@@ -12,8 +12,8 @@ from test.conftest import ClienteSNMPFalso, NotificadorFalso
 RUTA_SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 
 
-def tarea_que_imprime(texto):
-    return lambda: print(texto)
+def tarea_que_devuelve(*lineas):
+    return lambda: list(lineas)
 
 
 def tarea_que_falla(mensaje):
@@ -48,40 +48,33 @@ def test_importar_main_no_configura_logging(tmp_path):
 # ------------------------------------------------------------------ ejecutar_tareas
 
 
-def test_falla_en_tarea_secuencial_no_frena_al_resto(capsys, caplog):
+def test_falla_en_tarea_secuencial_no_frena_al_resto(caplog):
     secuenciales = [
-        ("humedad", tarea_que_imprime("linea humedad")),
+        ("humedad", tarea_que_devuelve("linea humedad")),
         ("DC", tarea_que_falla("se rompio el DC")),
     ]
     paralelas = [
-        ("state a", tarea_que_imprime("linea a")),
-        ("state b", tarea_que_imprime("linea b")),
+        ("state a", tarea_que_devuelve("linea a")),
+        ("state b", tarea_que_devuelve("linea b")),
     ]
 
     resultados = main.ejecutar_tareas(secuenciales, paralelas)
 
-    assert resultados == [True, False, True, True]
-    salida = capsys.readouterr().out
-    assert "linea humedad" in salida
-    assert "linea a" in salida
-    assert "linea b" in salida
+    assert resultados == [["linea humedad"], None, ["linea a"], ["linea b"]]
     assert "Error al ejecutar DC" in caplog.text
     assert "se rompio el DC" in caplog.text  # el traceback queda en el log
 
 
-def test_falla_en_tarea_paralela_se_registra_y_el_resto_sigue(capsys, caplog):
+def test_falla_en_tarea_paralela_se_registra_y_el_resto_sigue(caplog):
     paralelas = [
-        ("state a", tarea_que_imprime("linea a")),
+        ("state a", tarea_que_devuelve("linea a")),
         ("state b", tarea_que_falla("fallo en un hilo")),
-        ("state c", tarea_que_imprime("linea c")),
+        ("state c", tarea_que_devuelve("linea c")),
     ]
 
     resultados = main.ejecutar_tareas([], paralelas)
 
-    assert resultados == [True, False, True]
-    salida = capsys.readouterr().out
-    assert "linea a" in salida
-    assert "linea c" in salida
+    assert resultados == [["linea a"], None, ["linea c"]]
     assert "Error al ejecutar state b" in caplog.text
     assert "fallo en un hilo" in caplog.text
 
@@ -89,9 +82,7 @@ def test_falla_en_tarea_paralela_se_registra_y_el_resto_sigue(capsys, caplog):
 # ------------------------------------------------------------------ crear_tareas + ejecutar_tareas
 
 
-def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(
-    monkeypatch, capsys, caplog, notificador, repo_db
-):
+def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(monkeypatch, caplog, notificador, repo_db):
     host_roto = c.HOST_NAME_STATE[0]
     respuestas = {
         c.OIDB: "25",
@@ -113,50 +104,95 @@ def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(
 
     resultados = main.ejecutar_tareas(*main.crear_tareas(notificador, repo_db))
 
-    lineas = capsys.readouterr().out.splitlines()
+    lineas = [linea for resultado in resultados if resultado for linea in resultado]
     lineas_state = [linea for linea in lineas if "battery=" in linea]
     assert len(lineas_state) == len(c.HOST_NAME_STATE) - 1
     assert not any(f"host={host_roto} " in linea for linea in lineas)
     assert f"ups_temp2,host={c.HOST_NAME_HUMEDAD} humidity=45" in lineas
-    assert resultados.count(False) == 1
+    assert resultados.count(None) == 1
     assert f"Error al ejecutar state {host_roto}" in caplog.text
 
 
 # ------------------------------------------------------------------ codigo de salida de main
 
 
+def preparar_main(monkeypatch, secuenciales, paralelas):
+    """main con tareas falsas, sin tocar el chat ni data/errores.db."""
+    monkeypatch.setattr(main, "Notificador", lambda ruta_env: NotificadorFalso())
+    monkeypatch.setattr(main, "RepositorioDB", lambda ruta_db: None)
+    monkeypatch.setattr(
+        main, "crear_tareas", lambda notificador, repo_db: (secuenciales, paralelas)
+    )
+
+
 @pytest.mark.parametrize(
     ("tareas", "codigo_esperado"),
     [
-        ([tarea_que_imprime("ok"), tarea_que_imprime("ok")], 0),
-        ([tarea_que_imprime("ok"), tarea_que_falla("x")], 0),  # al menos una bien -> 0
+        ([tarea_que_devuelve("a"), tarea_que_devuelve("b")], 0),
+        ([tarea_que_devuelve("a"), tarea_que_falla("x")], 0),  # hay metricas -> 0
         ([tarea_que_falla("x"), tarea_que_falla("y")], 1),  # fallaron todas -> 1
+        ([tarea_que_devuelve(), tarea_que_devuelve()], 1),  # ningun equipo respondio -> 1
     ],
 )
 def test_codigo_de_salida(monkeypatch, tareas, codigo_esperado):
-    monkeypatch.setattr(main, "Notificador", lambda ruta_env: NotificadorFalso())
-    monkeypatch.setattr(main, "RepositorioDB", lambda ruta_db: None)  # no tocar data/errores.db
-    monkeypatch.setattr(
-        main,
-        "crear_tareas",
-        lambda notificador, repo_db: ([], [(f"t{i}", t) for i, t in enumerate(tareas)]),
-    )
+    preparar_main(monkeypatch, [], [(f"t{i}", t) for i, t in enumerate(tareas)])
 
     assert main.main() == codigo_esperado
 
 
 def test_si_fallan_tareas_se_registra_el_resumen(monkeypatch, caplog):
-    monkeypatch.setattr(main, "Notificador", lambda ruta_env: NotificadorFalso())
-    monkeypatch.setattr(main, "RepositorioDB", lambda ruta_db: None)
-    monkeypatch.setattr(
-        main,
-        "crear_tareas",
-        lambda notificador, repo_db: (
-            [],
-            [("a", tarea_que_imprime("ok")), ("b", tarea_que_falla("x"))],
-        ),
-    )
+    preparar_main(monkeypatch, [], [("a", tarea_que_devuelve("ok")), ("b", tarea_que_falla("x"))])
 
     main.main()
 
     assert "Fallaron 1 de 2 tareas" in caplog.text
+
+
+# ------------------------------------------------------------------ salida a stdout
+
+
+def test_main_escribe_las_lineas_en_el_orden_de_las_tareas(monkeypatch, capsys):
+    preparar_main(
+        monkeypatch,
+        [("humedad", tarea_que_devuelve("humedad"))],
+        [
+            ("a", tarea_que_devuelve("a1", "a2")),
+            ("b", tarea_que_falla("x")),
+            ("c", tarea_que_devuelve()),
+            ("d", tarea_que_devuelve("d1")),
+        ],
+    )
+
+    main.main()
+
+    assert capsys.readouterr().out == "humedad\na1\na2\nd1\n"
+
+
+class StdoutQueRegistra:
+    def __init__(self):
+        self.escrituras = []
+
+    def write(self, texto):
+        self.escrituras.append(texto)
+
+    def flush(self):
+        pass
+
+
+def test_main_escribe_todo_con_una_sola_escritura(monkeypatch):
+    # Una sola escritura desde el hilo principal: no hay forma de que dos lineas se intercalen
+    stdout = StdoutQueRegistra()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    preparar_main(monkeypatch, [], [(f"t{i}", tarea_que_devuelve(f"linea {i}")) for i in range(20)])
+
+    main.main()
+
+    assert stdout.escrituras == ["".join(f"linea {i}\n" for i in range(20))]
+
+
+def test_sin_metricas_no_escribe_nada(monkeypatch, capsys, caplog):
+    preparar_main(monkeypatch, [], [("a", tarea_que_devuelve())])
+
+    assert main.main() == 1
+    assert capsys.readouterr().out == ""  # ni siquiera un salto de linea suelto
+    assert "No se obtuvo ninguna metrica" in caplog.text

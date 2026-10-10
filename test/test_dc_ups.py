@@ -22,16 +22,15 @@ RESPUESTAS_OK = {
 
 
 def ejecutar(respuestas):
-    driver = DataCenterUPS(HOST, ClienteSNMPFalso(respuestas))
-    driver.ejecutar(c.OID_DC)
-    return driver
+    return DataCenterUPS(HOST, ClienteSNMPFalso(respuestas)).ejecutar(c.OID_DC)
 
 
-def test_todos_los_datos_imprime_todas_las_lineas(capsys):
-    ejecutar(RESPUESTAS_OK)
+def test_todos_los_datos_devuelve_todas_las_lineas_sin_imprimir(capsys):
+    lineas = ejecutar(RESPUESTAS_OK)
 
     total_va = 220 * 10 + 221 * 20 + 222 * 30
-    assert capsys.readouterr().out.splitlines() == [
+    assert capsys.readouterr().out == ""  # la salida la escribe main
+    assert lineas == [
         f"dc-ups,host={HOST} autonomia=10.0",
         f"dc-ups,host={HOST} carga_bat=100",
         f"dc-ups,host={HOST} bat_temp=24",
@@ -44,28 +43,24 @@ def test_todos_los_datos_imprime_todas_las_lineas(capsys):
     ]
 
 
-def test_fase_sin_corriente_omite_su_potencia_y_los_totales(capsys):
+def test_fase_sin_corriente_omite_su_potencia_y_los_totales():
     respuestas = dict(RESPUESTAS_OK)
     del respuestas[c.OID_CORRIENTE_OUT_F3]
 
-    ejecutar(respuestas)
+    salida = ejecutar(respuestas)
 
-    salida = capsys.readouterr().out.splitlines()
     assert f"dc-ups,host={HOST} corriente_out_f1=10,corriente_out_f2=20" in salida
     assert f"dc-ups,host={HOST} potencia_va_out_a=2200,potencia_va_out_b=4420" in salida
 
 
-def test_valor_no_numerico_no_aborta(capsys):
+def test_valor_no_numerico_no_aborta():
     respuestas = dict(RESPUESTAS_OK, **{c.OID_CARGA_BATERIA: "NOSUCHINSTANCE"})
 
-    ejecutar(respuestas)
+    salida = ejecutar(respuestas)
 
-    salida = capsys.readouterr().out
-    assert "carga_bat" not in salida
+    assert not any("carga_bat" in linea for linea in salida)
     assert f"dc-ups,host={HOST} autonomia=10.0" in salida
 
 
-def test_sin_respuesta_no_imprime_nada(capsys):
-    ejecutar({})
-
-    assert capsys.readouterr().out == ""
+def test_sin_respuesta_no_devuelve_lineas():
+    assert ejecutar({}) == []
