@@ -39,22 +39,16 @@ def test_nunca_escribe_en_stdout(capsys, tmp_path):
     assert capsys.readouterr().out == ""
 
 
-def test_info_va_al_archivo_y_no_a_stderr(capsys, tmp_path):
+@pytest.mark.parametrize("nivel", ["info", "warning", "error"])
+def test_todo_va_al_archivo_y_nada_a_la_consola(capsys, tmp_path, nivel):
     configurar_logger(log_dir=str(tmp_path))
 
-    logging.getLogger("prueba").info("mensaje informativo")
-
-    assert "mensaje informativo" in leer_log(tmp_path)
-    assert "mensaje informativo" not in capsys.readouterr().err
-
-
-def test_warning_va_al_archivo_y_a_stderr(capsys, tmp_path):
-    configurar_logger(log_dir=str(tmp_path))
-
-    logging.getLogger("prueba").warning("timeout en f1r2u1")
+    getattr(logging.getLogger("prueba"), nivel)("timeout en f1r2u1")
 
     assert "timeout en f1r2u1" in leer_log(tmp_path)
-    assert "timeout en f1r2u1" in capsys.readouterr().err
+    consola = capsys.readouterr()
+    assert consola.out == ""
+    assert consola.err == ""
 
 
 def test_usa_la_variable_de_entorno_para_la_carpeta(monkeypatch, tmp_path):
@@ -93,3 +87,13 @@ def test_si_no_puede_crear_el_archivo_sigue_con_stderr(capsys, tmp_path):
     err = capsys.readouterr().err
     assert "No se pudo abrir el archivo de log" in err
     assert "sigue funcionando" in err
+
+
+def test_sin_archivo_stderr_solo_muestra_desde_warning(capsys, tmp_path):
+    no_es_carpeta = tmp_path / "archivo"
+    no_es_carpeta.write_text("")
+
+    configurar_logger(log_dir=str(no_es_carpeta))
+    logging.getLogger("prueba").info("informativo")
+
+    assert "informativo" not in capsys.readouterr().err
