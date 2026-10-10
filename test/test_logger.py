@@ -2,6 +2,7 @@ import logging
 import os
 
 import pytest
+
 import config.configuracion as c
 from infraestructura.logger import configurar_logger
 

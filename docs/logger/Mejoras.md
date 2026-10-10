@@ -44,11 +44,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-logger.warning("Timeout SNMP en %s (oid=%s)", host, oid)    # bien: formato %s del módulo logging
-logger.exception("Error al ejecutar StateUPS para %s", host) # dentro de un except: agrega el traceback
+logger.warning("Timeout SNMP en %s (oid=%s)", host, oid)  # bien: formato %s del módulo logging
+logger.exception(
+    "Error al ejecutar StateUPS para %s", host
+)  # dentro de un except: agrega el traceback
 
-logger.warning(f"Timeout SNMP en {host}")                    # evitar: f-string
-logger.warning("Timeout SNMP", host=host)                    # NO: lanza TypeError (era sintaxis de seqlog)
+logger.warning(f"Timeout SNMP en {host}")  # evitar: f-string
+logger.warning("Timeout SNMP", host=host)  # NO: lanza TypeError (era sintaxis de seqlog)
 ```
 
 Niveles:

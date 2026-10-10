@@ -4,6 +4,7 @@ import sys
 
 import pytest
 from easysnmp import EasySNMPConnectionError
+
 import config.configuracion as c
 import main
 from test.conftest import ClienteSNMPFalso, NotificadorFalso
@@ -18,10 +19,12 @@ def tarea_que_imprime(texto):
 def tarea_que_falla(mensaje):
     def tarea():
         raise RuntimeError(mensaje)
+
     return tarea
 
 
 # ------------------------------------------------------------------ import sin efectos secundarios
+
 
 def test_importar_main_no_configura_logging(tmp_path):
     # En un proceso aparte: importar main no debe escribir nada ni crear la carpeta de logs
@@ -29,7 +32,11 @@ def test_importar_main_no_configura_logging(tmp_path):
     entorno = dict(os.environ, PYTHONPATH=RUTA_SRC, MONITOREO_LOG_DIR=str(carpeta_logs))
 
     resultado = subprocess.run(
-        [sys.executable, "-c", "import main"], env=entorno, capture_output=True, text=True, timeout=30
+        [sys.executable, "-c", "import main"],
+        env=entorno,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
     assert resultado.returncode == 0
@@ -40,9 +47,16 @@ def test_importar_main_no_configura_logging(tmp_path):
 
 # ------------------------------------------------------------------ ejecutar_tareas
 
+
 def test_falla_en_tarea_secuencial_no_frena_al_resto(capsys, caplog):
-    secuenciales = [("humedad", tarea_que_imprime("linea humedad")), ("DC", tarea_que_falla("se rompio el DC"))]
-    paralelas = [("state a", tarea_que_imprime("linea a")), ("state b", tarea_que_imprime("linea b"))]
+    secuenciales = [
+        ("humedad", tarea_que_imprime("linea humedad")),
+        ("DC", tarea_que_falla("se rompio el DC")),
+    ]
+    paralelas = [
+        ("state a", tarea_que_imprime("linea a")),
+        ("state b", tarea_que_imprime("linea b")),
+    ]
 
     resultados = main.ejecutar_tareas(secuenciales, paralelas)
 
@@ -74,10 +88,18 @@ def test_falla_en_tarea_paralela_se_registra_y_el_resto_sigue(capsys, caplog):
 
 # ------------------------------------------------------------------ crear_tareas + ejecutar_tareas
 
-def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(monkeypatch, capsys, caplog, notificador, repo_db):
+
+def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(
+    monkeypatch, capsys, caplog, notificador, repo_db
+):
     host_roto = c.HOST_NAME_STATE[0]
     respuestas = {
-        c.OIDB: "25", c.OIDCAPACITY: "100", c.OIDLOAD: "40", c.OIDLIFE: "150000", c.OIDCURRENT: "6", c.OIDT: "22",
+        c.OIDB: "25",
+        c.OIDCAPACITY: "100",
+        c.OIDLOAD: "40",
+        c.OIDLIFE: "150000",
+        c.OIDCURRENT: "6",
+        c.OIDT: "22",
         c.OID_HUMEDAD: "45",
     }
 
@@ -102,19 +124,22 @@ def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(monkeypatch, capsys, ca
 
 # ------------------------------------------------------------------ codigo de salida de main
 
+
 @pytest.mark.parametrize(
     ("tareas", "codigo_esperado"),
     [
         ([tarea_que_imprime("ok"), tarea_que_imprime("ok")], 0),
-        ([tarea_que_imprime("ok"), tarea_que_falla("x")], 0),   # al menos una bien -> 0
-        ([tarea_que_falla("x"), tarea_que_falla("y")], 1),      # fallaron todas -> 1
+        ([tarea_que_imprime("ok"), tarea_que_falla("x")], 0),  # al menos una bien -> 0
+        ([tarea_que_falla("x"), tarea_que_falla("y")], 1),  # fallaron todas -> 1
     ],
 )
 def test_codigo_de_salida(monkeypatch, tareas, codigo_esperado):
     monkeypatch.setattr(main, "Notificador", lambda ruta_env: NotificadorFalso())
     monkeypatch.setattr(main, "RepositorioDB", lambda ruta_db: None)  # no tocar data/errores.db
     monkeypatch.setattr(
-        main, "crear_tareas", lambda notificador, repo_db: ([], [(f"t{i}", t) for i, t in enumerate(tareas)])
+        main,
+        "crear_tareas",
+        lambda notificador, repo_db: ([], [(f"t{i}", t) for i, t in enumerate(tareas)]),
     )
 
     assert main.main() == codigo_esperado
@@ -124,7 +149,12 @@ def test_si_fallan_tareas_se_registra_el_resumen(monkeypatch, caplog):
     monkeypatch.setattr(main, "Notificador", lambda ruta_env: NotificadorFalso())
     monkeypatch.setattr(main, "RepositorioDB", lambda ruta_db: None)
     monkeypatch.setattr(
-        main, "crear_tareas", lambda notificador, repo_db: ([], [("a", tarea_que_imprime("ok")), ("b", tarea_que_falla("x"))])
+        main,
+        "crear_tareas",
+        lambda notificador, repo_db: (
+            [],
+            [("a", tarea_que_imprime("ok")), ("b", tarea_que_falla("x"))],
+        ),
     )
 
     main.main()

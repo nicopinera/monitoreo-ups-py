@@ -1,4 +1,5 @@
 import pytest
+
 import config.configuracion as c
 from core.errores import Errores
 from drivers.state_ups import StateUPS
@@ -39,7 +40,10 @@ def test_campos_sin_dato_se_omiten(capsys, notificador, repo_db):
 
     ejecutar(respuestas, notificador, repo_db)
 
-    assert capsys.readouterr().out == f"ups_temp2,host={HOST} battery=25,capacity=100,load=40,life=25.0\n"
+    assert (
+        capsys.readouterr().out
+        == f"ups_temp2,host={HOST} battery=25,capacity=100,load=40,life=25.0\n"
+    )
     assert notificador.mensajes == []
 
 
