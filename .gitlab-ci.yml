@@ -2,7 +2,7 @@ stages: [calidad,test,seguridad]
 
 variables:
   UV_VERSION: "0.13.0"
-  UV_CHACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
   UV_LINK_MODE: copy
 
 workflow:
