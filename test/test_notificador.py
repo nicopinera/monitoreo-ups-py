@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+
 import infraestructura.notificador as modulo_notificador
 from infraestructura.notificador import Notificador
 
@@ -12,6 +13,7 @@ class RespuestaFalsa:
 
 def http_falso(status=200, contenido=b"", excepcion=None):
     """Reemplazo de httplib2.Http que devuelve una respuesta fija o lanza una excepcion."""
+
     class HttpFalso:
         def __init__(self, *args, **kwargs):
             pass
@@ -20,6 +22,7 @@ def http_falso(status=200, contenido=b"", excepcion=None):
             if excepcion:
                 raise excepcion
             return RespuestaFalsa(status), contenido
+
     return HttpFalso
 
 
@@ -32,7 +35,9 @@ def notificador(monkeypatch, tmp_path):
 
 
 def test_respuesta_distinta_de_200_se_registra(monkeypatch, caplog, notificador):
-    monkeypatch.setattr(modulo_notificador, "Http", http_falso(status=500, contenido=b"error interno"))
+    monkeypatch.setattr(
+        modulo_notificador, "Http", http_falso(status=500, contenido=b"error interno")
+    )
 
     with caplog.at_level(logging.ERROR):
         notificador.enviar_mensajes("hola")

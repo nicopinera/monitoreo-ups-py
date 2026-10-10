@@ -1,15 +1,20 @@
-from easysnmp import Session, EasySNMPTimeoutError
-import config.configuracion as c
 import logging
 import math
 
+from easysnmp import EasySNMPTimeoutError, Session
+
+import config.configuracion as c
+
+
 class ClienteSNMP:
-    def __init__(self,hostname):
+    def __init__(self, hostname):
         self.fullhostname = hostname + c.SUFIJO
-        self.session = Session(hostname=self.fullhostname, community=c.COMMUNITY, version=c.VERSION_SNMP)
+        self.session = Session(
+            hostname=self.fullhostname, community=c.COMMUNITY, version=c.VERSION_SNMP
+        )
         self.logger = logging.getLogger(__name__)
-    
-    def obtener_valor(self,oid):
+
+    def obtener_valor(self, oid):
         try:
             valor_aux = self.session.get(oid).value
             return valor_aux
@@ -17,10 +22,12 @@ class ClienteSNMP:
             self.logger.warning("Timeout SNMP en %s (oid=%s)", self.fullhostname, oid)
             return None
         except Exception as e:
-            self.logger.error("Error al obtener valor SNMP de %s (oid=%s): %s", self.fullhostname, oid, e)
+            self.logger.error(
+                "Error al obtener valor SNMP de %s (oid=%s): %s", self.fullhostname, oid, e
+            )
             return None
 
-    def obtener_valor_numerico(self,oid):
+    def obtener_valor_numerico(self, oid):
         """
         Devuelve el valor del OID como int (o float si tiene decimales).
         Devuelve None si no hubo respuesta o si el valor no es numerico,

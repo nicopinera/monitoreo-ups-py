@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from logging.handlers import RotatingFileHandler
+
 import config.configuracion as c
 
 FORMATO_LOG = "%(asctime)s %(levelname)s %(name)s [%(threadName)s] %(message)s"
@@ -53,5 +54,7 @@ def configurar_logger(log_dir=None, nivel=None):
 
     if error_archivo:
         logging.getLogger(__name__).warning(
-            "No se pudo abrir el archivo de log en %s (%s), se sigue solo con stderr", log_dir, error_archivo
+            "No se pudo abrir el archivo de log en %s (%s), se sigue solo con stderr",
+            log_dir,
+            error_archivo,
         )
