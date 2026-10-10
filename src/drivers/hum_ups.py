@@ -15,13 +15,12 @@ class HumedadUPS(BaseUPS):
         """El sensor de humedad no tiene alertas por ahora"""
         pass
 
-    def imprimir_telegraf(self):
-        """Si no hay dato de humedad no se imprime la linea"""
+    def lineas_telegraf(self):
+        """Si no hay dato de humedad no hay linea"""
         campos = self._formatear_campos(("humidity",))
-        if campos:
-            print(f"ups_temp2,host={self.hostname} {campos}")
+        return [f"ups_temp2,host={self.hostname} {campos}"] if campos else []
 
     def ejecutar(self, oid_hum):
         self.obtener_datos(oid_hum)
         self.validar_datos_y_notificar()
-        self.imprimir_telegraf()
+        return self.lineas_telegraf()

@@ -24,12 +24,16 @@ class BaseUPS(ABC):
         pass
 
     @abstractmethod
-    def imprimir_telegraf(self):
-        """Cada driver imprime su formato para grafana/telegraf"""
+    def lineas_telegraf(self):
+        """
+        Cada driver arma sus lineas para grafana/telegraf y las devuelve como lista de str.
+        No imprime: la salida la escribe main desde el hilo principal (ver main.escribir_lineas).
+        """
         pass
 
     @abstractmethod
     def ejecutar(self):
+        """Lee, valida y devuelve las lineas de telegraf del equipo."""
         pass
 
     def _formatear_campos(self, campos):

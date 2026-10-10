@@ -119,7 +119,7 @@ ARCHIVO_DB = os.path.join(RUTA_RAIZ, "data", "errores.db")
 ARCHIVO_CREACION_TABLA_STATE = os.path.join(RUTA_RAIZ, "data", "creacion_tabla_state.sql")
 VAR_PASSWORDCHAT = "PASSWORDCHAT"
 
-# Logging: archivo rotativo en LOGS_DIR (se puede cambiar con MONITOREO_LOG_DIR) + stderr
+# Logging: archivo rotativo en LOGS_DIR (se puede cambiar con MONITOREO_LOG_DIR); stderr solo si falla el archivo
 LOGS_DIR = os.path.join(RUTA_RAIZ, "logs")
 NOMBRE_ARCHIVO_LOG = "monitoreo.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB por archivo

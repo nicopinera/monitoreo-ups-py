@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import logging
 from datetime import datetime
 
 from core.errores import Errores
@@ -12,6 +13,8 @@ from core.validacion import (
     validar_temp_uio,
     validar_tiempo_autonomia,
 )
+
+logger = logging.getLogger(__name__)
 
 # Orden de los campos en la linea de telegraf
 CAMPOS_TELEGRAF = ("battery", "temp", "capacity", "load", "life", "current")
@@ -135,14 +138,22 @@ class StateUPS(BaseUPS):
                 f"{encabezado}\n{cuerpo}\n\n📅 *Fecha informe:* {fecha_string}"
             )
 
-    def imprimir_telegraf(self):
-        """Cada driver imprime su formato para grafana/telegraf. Los campos sin dato se omiten."""
+    def lineas_telegraf(self):
+        """Una linea con los campos que tienen dato; ninguna si no hay datos."""
         campos = self._formatear_campos(CAMPOS_TELEGRAF)
-        if campos:
-            print(f"ups_temp2,host={self.hostname} {campos}")
+        return [f"ups_temp2,host={self.hostname} {campos}"] if campos else []
 
     def ejecutar(self, oid_dicc, oidtemp, oidtemp2):
-        """Las excepciones no se atrapan aca: main las registra y sigue con el resto de los UPS."""
+        """
+        Devuelve las lineas de telegraf del UPS.
+        - Un error al leer los datos se propaga: main lo registra y sigue con el resto de los UPS.
+        - Un error al validar o notificar (base de datos, Google Chat) se registra aca y las
+          metricas se devuelven igual, porque no dependen de la base ni del chat.
+        """
         self.obtener_datos(oid_dicc, oidtemp, oidtemp2)
-        self.imprimir_telegraf()
-        self.validar_datos_y_notificar()
+        lineas = self.lineas_telegraf()
+        try:
+            self.validar_datos_y_notificar()
+        except Exception:
+            logger.exception("Error al validar o notificar %s", self.hostname)
+        return lineas

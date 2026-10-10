@@ -72,13 +72,15 @@ class DataCenterUPS(BaseUPS):
         """Cada driver tiene sus propia logica para validar y generar las alertas"""
         pass
 
-    def imprimir_telegraf(self):
-        """Cada driver imprime su formato para grafana/telegraf. Los campos sin dato se omiten."""
+    def lineas_telegraf(self):
+        """Una linea por grupo de LINEAS_TELEGRAF; se omiten los campos y las lineas sin dato."""
+        lineas = []
         for campos_linea in LINEAS_TELEGRAF:
             campos = self._formatear_campos(campos_linea)
             if campos:
-                print(f"dc-ups,host={self.hostname} {campos}")
+                lineas.append(f"dc-ups,host={self.hostname} {campos}")
+        return lineas
 
     def ejecutar(self, oid_metricas_dc):
         self.obtener_datos(oid_metricas_dc)
-        self.imprimir_telegraf()
+        return self.lineas_telegraf()
