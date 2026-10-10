@@ -8,10 +8,7 @@
 
 ## A dónde van los logs
 
-| Destino | Qué llega | Para qué sirve |
-| --- | --- | --- |
-| `logs/monitoreo.log` (archivo rotativo) | Todo desde `INFO` (configurable) | Historial para revisar qué pasó en ejecuciones anteriores |
-| stderr | Sólo `WARNING`, `ERROR` y `CRITICAL` | Ver problemas al correrlo a mano. Telegraf lo muestra en su log cuando la ejecución termina con error |
+**Sólo al archivo `logs/monitoreo.log`** (rotativo), desde `INFO` (configurable). No se escribe nada por consola: ni en stdout (reservado para Telegraf) ni en stderr. Para seguir una ejecución: `tail -f logs/monitoreo.log`.
 
 - **Rotación:** `monitoreo.log` rota a los 5 MB y se guardan 5 archivos viejos (`monitoreo.log.1` … `monitoreo.log.5`). Como máximo ocupa unos 30 MB.
 - **Formato:**
@@ -22,7 +19,7 @@
 
   Cada línea tiene: fecha · nivel · módulo que escribió el log · hilo (útil porque los UPS se consultan en paralelo) · mensaje.
 
-- **Si no se puede crear el archivo** (falta de permisos, disco lleno), el monitoreo sigue funcionando sólo con stderr y lo avisa con un warning.
+- **Si no se puede crear el archivo** (falta de permisos, disco lleno), el monitoreo sigue funcionando y los logs van a stderr desde `WARNING`, con un aviso de por qué. Es el único caso en que aparece algo por consola; así los errores no se pierden.
 
 ## Configuración
 
@@ -33,7 +30,7 @@ Por variables de entorno del proceso. En Telegraf se definen con la opción `env
 | `MONITOREO_LOG_DIR` | `logs/` en la raíz del repo | `/data/logs` |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `WARNING` |
 
-`LOG_LEVEL` controla qué llega al archivo; stderr siempre muestra desde `WARNING`. Un valor inválido se toma como `INFO`.
+`LOG_LEVEL` controla qué llega al archivo. Un valor inválido se toma como `INFO`.
 
 > Estas variables **no** se leen del `.env` del repo, porque el `.env` se carga recién al crear el notificador, después de configurar el logging. Esto se unifica en el paso 12 del plan (configuración por variables de entorno).
 
