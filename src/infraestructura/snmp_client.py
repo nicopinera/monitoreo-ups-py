@@ -7,19 +7,37 @@ import config.configuracion as c
 
 
 class ClienteSNMP:
+    """
+    Cliente SNMP de un host. Se crea uno por host y por ejecucion.
+    Despues del primer timeout no se consultan mas OIDs de ese host en esta ejecucion:
+    si no respondio a uno, esperar el timeout de cada OID restante solo alarga la ejecucion.
+    """
+
     def __init__(self, hostname):
         self.fullhostname = hostname + c.SUFIJO
         self.session = Session(
-            hostname=self.fullhostname, community=c.COMMUNITY, version=c.VERSION_SNMP
+            hostname=self.fullhostname,
+            community=c.COMMUNITY,
+            version=c.VERSION_SNMP,
+            timeout=c.SNMP_TIMEOUT,
+            retries=c.SNMP_RETRIES,
         )
         self.logger = logging.getLogger(__name__)
+        self.sin_respuesta = False
 
     def obtener_valor(self, oid):
+        if self.sin_respuesta:
+            return None
         try:
             valor_aux = self.session.get(oid).value
             return valor_aux
         except EasySNMPTimeoutError:
-            self.logger.warning("Timeout SNMP en %s (oid=%s)", self.fullhostname, oid)
+            self.sin_respuesta = True
+            self.logger.warning(
+                "Timeout SNMP en %s (oid=%s), no se consultan mas OIDs de este host",
+                self.fullhostname,
+                oid,
+            )
             return None
         except Exception as e:
             self.logger.error(

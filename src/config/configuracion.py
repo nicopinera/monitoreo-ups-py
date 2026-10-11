@@ -5,6 +5,17 @@ import os
 COMMUNITY = "publicapc"
 VERSION_SNMP = 1
 
+# Un OID sin respuesta cuesta SNMP_TIMEOUT * (1 + SNMP_RETRIES) segundos (hoy 2 s).
+# Ademas, despues del primer timeout no se consultan mas OIDs de ese host (ver ClienteSNMP).
+SNMP_TIMEOUT = 1  # segundos por intento
+SNMP_RETRIES = 1
+
+# Hilos para consultar los equipos en paralelo: casi todo el tiempo esperan la red
+MAX_WORKERS = 13
+
+# Segundos maximos para enviar un mensaje a Google Chat
+HTTP_TIMEOUT = 10
+
 HOST_NAME_SHORT_F1 = [
     "f1r2u1",
     "f1r2u2",

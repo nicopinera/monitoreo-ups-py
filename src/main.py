@@ -17,8 +17,6 @@ from infraestructura.snmp_client import ClienteSNMP
 
 logger = logging.getLogger(__name__)
 
-MAX_WORKERS = 6
-
 
 # Cada tarea devuelve las lineas de telegraf de su equipo (list[str])
 
@@ -41,21 +39,17 @@ def _tarea_state(host, notificador, repo_db):
 
 def crear_tareas(notificador, repo_db):
     """
-    Arma las tareas a ejecutar como listas de (nombre, funcion). Cada funcion devuelve sus lineas.
+    Arma las tareas a ejecutar como una lista de (nombre, funcion). Cada funcion devuelve sus lineas.
     Cada tarea crea su propio cliente SNMP, asi un host que falla al crear la sesion
     (por ejemplo un nombre que no resuelve DNS) solo afecta a ese host.
-
-    Devuelve (tareas_secuenciales, tareas_paralelas).
     """
-    tareas_secuenciales = [
+    return [
         (f"humedad {c.HOST_NAME_HUMEDAD}", _tarea_humedad),
         (f"DC {c.HOST_NAME_DC}", _tarea_dc),
-    ]
-    tareas_paralelas = [
+    ] + [
         (f"state {host}", partial(_tarea_state, host, notificador, repo_db))
         for host in c.HOST_NAME_STATE
     ]
-    return tareas_secuenciales, tareas_paralelas
 
 
 def _ejecutar_protegido(nombre, tarea):
@@ -70,23 +64,16 @@ def _ejecutar_protegido(nombre, tarea):
         return None
 
 
-def ejecutar_tareas(tareas_secuenciales, tareas_paralelas, max_workers=MAX_WORKERS):
+def ejecutar_tareas(tareas, max_workers=c.MAX_WORKERS):
     """
-    Ejecuta primero las tareas secuenciales y despues las paralelas en un pool de hilos.
-    Devuelve un resultado por tarea, en el orden de las tareas (no en el que terminan):
-    sus lineas (list[str]) o None si lanzo una excepcion.
+    Ejecuta todas las tareas en un pool de hilos (humedad y DC incluidos: asi sus timeouts no
+    se suman al resto). Devuelve un resultado por tarea, en el orden de las tareas (no en el que
+    terminan): sus lineas (list[str]) o None si lanzo una excepcion.
     Las tareas no escriben en stdout: los resultados vuelven al hilo principal por los futures.
     """
-    resultados = [_ejecutar_protegido(nombre, tarea) for nombre, tarea in tareas_secuenciales]
-
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(_ejecutar_protegido, nombre, tarea)
-            for nombre, tarea in tareas_paralelas
-        ]
-    resultados += [future.result() for future in futures]
-
-    return resultados
+        futures = [executor.submit(_ejecutar_protegido, nombre, tarea) for nombre, tarea in tareas]
+    return [future.result() for future in futures]
 
 
 def escribir_lineas(lineas):
@@ -113,8 +100,7 @@ def main():
     notificador = Notificador(c.ARCHIVO_ENV)
     repo_db = RepositorioDB(c.ARCHIVO_DB)
 
-    tareas_secuenciales, tareas_paralelas = crear_tareas(notificador, repo_db)
-    resultados = ejecutar_tareas(tareas_secuenciales, tareas_paralelas)
+    resultados = ejecutar_tareas(crear_tareas(notificador, repo_db))
 
     lineas = [linea for resultado in resultados if resultado for linea in resultado]
     escribir_lineas(lineas)
