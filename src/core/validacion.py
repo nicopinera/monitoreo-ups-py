@@ -1,10 +1,11 @@
-#!/usr/bin/python3
-
 import config.configuracion as c
 from core.errores import Errores
 
+# Resultado de una validacion: (error, mensaje) si hay problema, (None, None) si no
+Resultado = tuple[Errores, str] | tuple[None, None]
 
-def validar_temp_bateria(valor):
+
+def validar_temp_bateria(valor: float) -> Resultado:
     """
     Valida la temperatura de las baterias, si se encuentra en nivel critico
     genera tanto el error, como el mensaje de notificacion para el chat de google
@@ -19,7 +20,7 @@ def validar_temp_bateria(valor):
     return None, None
 
 
-def validar_temp_uio(valor):
+def validar_temp_uio(valor: float) -> Resultado:
     """
     Valida la temperatura del UIO, si se encuentra en nivel critico
     genera tanto el error, como el mensaje de notificacion para el chat de google
@@ -38,7 +39,7 @@ def validar_temp_uio(valor):
     return None, None
 
 
-def validar_carga(valor):
+def validar_carga(valor: float) -> Resultado:
     """
     Valida la carga de las baterias, si se encuentra en nivel critico
     genera tanto el error, como el mensaje de notificacion para el chat de google
@@ -53,7 +54,7 @@ def validar_carga(valor):
     return None, None
 
 
-def validar_load(valor):
+def validar_load(valor: float) -> Resultado:
     """
     Valida la carga a la salida del UPS, si se encuentra en nivel critico
     genera tanto el error, como el mensaje de notificacion para el chat de google
@@ -68,7 +69,7 @@ def validar_load(valor):
     return None, None
 
 
-def validar_tiempo_autonomia(valor):
+def validar_tiempo_autonomia(valor: float) -> Resultado:
     """
     Valida el tiempo de autonomia del UPS, si se encuentra en nivel critico
     genera tanto el error, como el mensaje de notificacion para el chat de google
@@ -83,7 +84,7 @@ def validar_tiempo_autonomia(valor):
     return None, None
 
 
-def validar_respuesta_snmp(hay_datos):
+def validar_respuesta_snmp(hay_datos: bool) -> Resultado:
     """
     Valida que el equipo haya respondido al menos una consulta SNMP, si no respondio
     ninguna genera tanto el error, como el mensaje de notificacion para el chat de google
