@@ -4,3 +4,10 @@ __pycache__/
 venv/
 .coverage
 logs/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage.xml
+report.xml

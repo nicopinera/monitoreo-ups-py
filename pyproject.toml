@@ -1,0 +1,51 @@
+[project]
+name = "monitoreo-ups"
+version = "2.0.0"
+description = "Monitoreo SNMP de UPS con salida line protocol para Telegraf y alertas a Google Chat."
+requires-python = ">=3.10"
+dependencies = [
+    "easysnmp>=0.2.6",
+    "python-dotenv>=1.2.4",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["test"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 60
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "test"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+mypy_path = "src"
+explicit_package_bases = true   # src/ no tiene __init__.py
+
+[[tool.mypy.overrides]]
+module = ["easysnmp.*"]
+ignore_missing_imports = true   # easysnmp no trae tipos
