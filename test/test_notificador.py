@@ -1,53 +1,86 @@
+import io
+import json
 import logging
+from urllib.error import HTTPError, URLError
 
 import pytest
 
+import config.configuracion as c
 import infraestructura.notificador as modulo_notificador
 from infraestructura.notificador import Notificador
 
+URL = "https://chat.example/webhook"
+
 
 class RespuestaFalsa:
-    def __init__(self, status):
-        self.status = status
+    """Lo minimo de la respuesta de urlopen: se usa como context manager."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
 
 
-def http_falso(status=200, contenido=b"", excepcion=None):
-    """Reemplazo de httplib2.Http que devuelve una respuesta fija o lanza una excepcion."""
+class UrlopenFalso:
+    """Reemplazo de urllib.request.urlopen: registra los pedidos y responde o lanza la excepcion."""
 
-    class HttpFalso:
-        def __init__(self, *args, **kwargs):
-            pass
+    def __init__(self, excepcion=None):
+        self.excepcion = excepcion
+        self.pedidos = []
 
-        def request(self, **kwargs):
-            if excepcion:
-                raise excepcion
-            return RespuestaFalsa(status), contenido
-
-    return HttpFalso
+    def __call__(self, pedido, timeout=None):
+        self.pedidos.append((pedido, timeout))
+        if self.excepcion:
+            raise self.excepcion
+        return RespuestaFalsa()
 
 
 @pytest.fixture
-def notificador(monkeypatch, tmp_path):
-    monkeypatch.setattr(modulo_notificador.time, "sleep", lambda segundos: None)
+def notificador(tmp_path):
     notificador = Notificador(str(tmp_path / ".env-inexistente"))
-    notificador.url = "https://chat.example/webhook"
+    notificador.url = URL
     return notificador
 
 
-def test_respuesta_distinta_de_200_se_registra(monkeypatch, caplog, notificador):
-    monkeypatch.setattr(
-        modulo_notificador, "Http", http_falso(status=500, contenido=b"error interno")
-    )
+def usar_urlopen(monkeypatch, excepcion=None):
+    urlopen = UrlopenFalso(excepcion)
+    monkeypatch.setattr(modulo_notificador, "urlopen", urlopen)
+    return urlopen
+
+
+def test_envia_un_post_json_con_timeout(monkeypatch, caplog, notificador):
+    urlopen = usar_urlopen(monkeypatch)
+
+    with caplog.at_level(logging.ERROR):
+        notificador.enviar_mensajes("hola ñandú")
+
+    [(pedido, timeout)] = urlopen.pedidos
+    assert pedido.full_url == URL
+    assert pedido.get_method() == "POST"
+    assert pedido.get_header("Content-type") == "application/json; charset=UTF-8"
+    assert json.loads(pedido.data.decode("utf-8")) == {"text": "hola ñandú"}
+    assert timeout == c.HTTP_TIMEOUT  # sin timeout, un chat colgado deja el hilo esperando
+    assert caplog.text == ""
+
+
+def test_respuesta_de_error_se_registra(monkeypatch, caplog, notificador):
+    error = HTTPError(URL, 429, "Too Many Requests", {}, io.BytesIO(b"limite de envio"))
+    usar_urlopen(monkeypatch, excepcion=error)
 
     with caplog.at_level(logging.ERROR):
         notificador.enviar_mensajes("hola")
 
-    assert "status=500" in caplog.text
-    assert "error interno" in caplog.text
+    assert "status=429" in caplog.text
+    assert "limite de envio" in caplog.text
 
 
-def test_excepcion_al_enviar_se_registra(monkeypatch, caplog, notificador):
-    monkeypatch.setattr(modulo_notificador, "Http", http_falso(excepcion=OSError("sin red")))
+@pytest.mark.parametrize(
+    "excepcion",
+    [URLError("sin red"), TimeoutError("timed out")],
+)
+def test_excepcion_al_enviar_se_registra(monkeypatch, caplog, notificador, excepcion):
+    usar_urlopen(monkeypatch, excepcion=excepcion)
 
     with caplog.at_level(logging.ERROR):
         notificador.enviar_mensajes("hola")
@@ -62,3 +95,15 @@ def test_sin_url_se_registra(caplog, notificador):
         notificador.enviar_mensajes("hola")
 
     assert "URL de Google Chat no configurada" in caplog.text
+
+
+@pytest.mark.parametrize("url", ["http://chat.example/webhook", "file:///etc/passwd"])
+def test_url_que_no_es_https_no_se_usa(monkeypatch, caplog, notificador, url):
+    urlopen = usar_urlopen(monkeypatch)
+    notificador.url = url
+
+    with caplog.at_level(logging.ERROR):
+        notificador.enviar_mensajes("hola")
+
+    assert urlopen.pedidos == []
+    assert "debe empezar con https://" in caplog.text
