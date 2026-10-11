@@ -1,5 +1,7 @@
 import logging
 import os
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -8,7 +10,7 @@ from infraestructura.logger import configurar_logger
 
 
 @pytest.fixture(autouse=True)
-def restaurar_logging():
+def restaurar_logging() -> Iterator[None]:
     """configurar_logger cambia el logger raiz: se restaura al terminar cada test."""
     raiz = logging.getLogger()
     handlers, nivel = raiz.handlers[:], raiz.level
@@ -20,14 +22,14 @@ def restaurar_logging():
     raiz.setLevel(nivel)
 
 
-def leer_log(log_dir):
+def leer_log(log_dir: Path) -> str:
     for handler in logging.getLogger().handlers:
         handler.flush()
     with open(os.path.join(log_dir, c.NOMBRE_ARCHIVO_LOG), encoding="utf-8") as archivo:
         return archivo.read()
 
 
-def test_nunca_escribe_en_stdout(capsys, tmp_path):
+def test_nunca_escribe_en_stdout(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     # Requisito clave: stdout es solo para las lineas de telegraf
     configurar_logger(log_dir=str(tmp_path))
     log = logging.getLogger("prueba")
@@ -40,7 +42,9 @@ def test_nunca_escribe_en_stdout(capsys, tmp_path):
 
 
 @pytest.mark.parametrize("nivel", ["info", "warning", "error"])
-def test_todo_va_al_archivo_y_nada_a_la_consola(capsys, tmp_path, nivel):
+def test_todo_va_al_archivo_y_nada_a_la_consola(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, nivel: str
+) -> None:
     configurar_logger(log_dir=str(tmp_path))
 
     getattr(logging.getLogger("prueba"), nivel)("timeout en f1r2u1")
@@ -51,7 +55,9 @@ def test_todo_va_al_archivo_y_nada_a_la_consola(capsys, tmp_path, nivel):
     assert consola.err == ""
 
 
-def test_usa_la_variable_de_entorno_para_la_carpeta(monkeypatch, tmp_path):
+def test_usa_la_variable_de_entorno_para_la_carpeta(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     carpeta = tmp_path / "logs_env"
     monkeypatch.setenv(c.VAR_LOG_DIR, str(carpeta))
 
@@ -61,7 +67,9 @@ def test_usa_la_variable_de_entorno_para_la_carpeta(monkeypatch, tmp_path):
     assert "desde env" in leer_log(carpeta)
 
 
-def test_nivel_debug_desde_variable_de_entorno(monkeypatch, tmp_path):
+def test_nivel_debug_desde_variable_de_entorno(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv(c.VAR_LOG_LEVEL, "debug")
 
     configurar_logger(log_dir=str(tmp_path))
@@ -70,13 +78,15 @@ def test_nivel_debug_desde_variable_de_entorno(monkeypatch, tmp_path):
     assert "detalle" in leer_log(tmp_path)
 
 
-def test_nivel_invalido_usa_info(tmp_path):
+def test_nivel_invalido_usa_info(tmp_path: Path) -> None:
     configurar_logger(log_dir=str(tmp_path), nivel="CUALQUIERA")
 
     assert logging.getLogger().level == logging.INFO
 
 
-def test_si_no_puede_crear_el_archivo_sigue_con_stderr(capsys, tmp_path):
+def test_si_no_puede_crear_el_archivo_sigue_con_stderr(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     # Un archivo en lugar de carpeta hace fallar la creacion del log
     no_es_carpeta = tmp_path / "archivo"
     no_es_carpeta.write_text("")
@@ -89,7 +99,9 @@ def test_si_no_puede_crear_el_archivo_sigue_con_stderr(capsys, tmp_path):
     assert "sigue funcionando" in err
 
 
-def test_sin_archivo_stderr_solo_muestra_desde_warning(capsys, tmp_path):
+def test_sin_archivo_stderr_solo_muestra_desde_warning(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     no_es_carpeta = tmp_path / "archivo"
     no_es_carpeta.write_text("")
 

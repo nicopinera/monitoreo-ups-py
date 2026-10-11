@@ -5,6 +5,9 @@ from easysnmp import EasySNMPTimeoutError, Session
 
 import config.configuracion as c
 
+# Valor numerico de un OID; None si no hubo respuesta o no es un numero valido
+Numero = int | float
+
 
 class ClienteSNMP:
     """
@@ -13,7 +16,7 @@ class ClienteSNMP:
     si no respondio a uno, esperar el timeout de cada OID restante solo alarga la ejecucion.
     """
 
-    def __init__(self, hostname):
+    def __init__(self, hostname: str) -> None:
         self.fullhostname = hostname + c.SUFIJO
         self.session = Session(
             hostname=self.fullhostname,
@@ -25,12 +28,12 @@ class ClienteSNMP:
         self.logger = logging.getLogger(__name__)
         self.sin_respuesta = False
 
-    def obtener_valor(self, oid):
+    def obtener_valor(self, oid: str) -> str | None:
         if self.sin_respuesta:
             return None
         try:
-            valor_aux = self.session.get(oid).value
-            return valor_aux
+            valor: str = self.session.get(oid).value
+            return valor
         except EasySNMPTimeoutError:
             self.sin_respuesta = True
             self.logger.warning(
@@ -45,7 +48,7 @@ class ClienteSNMP:
             )
             return None
 
-    def obtener_valor_numerico(self, oid):
+    def obtener_valor_numerico(self, oid: str) -> Numero | None:
         """
         Devuelve el valor del OID como int (o float si tiene decimales).
         Devuelve None si no hubo respuesta o si el valor no es numerico,

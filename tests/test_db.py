@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -6,7 +7,7 @@ from infraestructura.database import RepositorioDB
 
 
 @pytest.fixture
-def db_repo(tmp_path):
+def db_repo(tmp_path: Path) -> RepositorioDB:
     # Creamos una base de datos temporal para cada test
     db_file = tmp_path / "test_errores.db"
     # El RepositorioDB usará el script SQL real definido en la configuración
@@ -14,7 +15,7 @@ def db_repo(tmp_path):
     return repo
 
 
-def test_creacion_tablas(db_repo):
+def test_creacion_tablas(db_repo: RepositorioDB) -> None:
     """Verifica que las tablas se creen correctamente al inicializar."""
     with sqlite3.connect(db_repo.db_file) as conn:
         cursor = conn.cursor()
@@ -22,7 +23,7 @@ def test_creacion_tablas(db_repo):
         assert cursor.fetchone() is not None
 
 
-def test_agregar_y_consultar_error_activo(db_repo):
+def test_agregar_y_consultar_error_activo(db_repo: RepositorioDB) -> None:
     """Prueba que un error se agregue y se pueda encontrar como activo."""
     host = "ups-test"
     error = "BATERIA_BAJA"
@@ -36,7 +37,7 @@ def test_agregar_y_consultar_error_activo(db_repo):
     assert resultado[3] == "activo"  # estado_error
 
 
-def test_resolver_error(db_repo):
+def test_resolver_error(db_repo: RepositorioDB) -> None:
     """Prueba que un error activo pase a estado resuelto."""
     host = "ups-test"
     error = "SOBRECARGA"
@@ -53,7 +54,7 @@ def test_resolver_error(db_repo):
     assert resuelto[3] == "resuelto"
 
 
-def test_activar_error_resuelto(db_repo):
+def test_activar_error_resuelto(db_repo: RepositorioDB) -> None:
     """Prueba que un error resuelto pueda volver a activarse."""
     host = "ups-test"
     error = "TEMPERATURA"
@@ -72,7 +73,7 @@ def test_activar_error_resuelto(db_repo):
     assert activo[3] == "activo"
 
 
-def test_historial_errores(db_repo):
+def test_historial_errores(db_repo: RepositorioDB) -> None:
     """Verifica que el sistema distinga entre errores de diferentes hosts."""
     db_repo.agregar_error("UPS-A", "ERROR_1")
     db_repo.agregar_error("UPS-B", "ERROR_1")
@@ -84,3 +85,14 @@ def test_historial_errores(db_repo):
 
     assert db_repo.error_activo("UPS-A", "ERROR_1") is None
     assert db_repo.error_activo("UPS-B", "ERROR_1") is not None
+
+
+def test_crea_la_carpeta_de_la_base_si_no_existe(tmp_path: Path) -> None:
+    # data/ no esta en git: en un clon nuevo no existe
+    db_file = tmp_path / "data" / "errores.db"
+
+    repo = RepositorioDB(str(db_file))
+    repo.agregar_error("ups-test", "CARGA_MINIMA")
+
+    assert db_file.exists()
+    assert repo.error_activo("ups-test", "CARGA_MINIMA") is not None
