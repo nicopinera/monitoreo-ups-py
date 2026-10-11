@@ -21,7 +21,8 @@ CAMPOS_TELEGRAF = ("battery", "temp", "capacity", "load", "life", "current")
 
 
 class StateUPS(BaseUPS):
-    def __init__(self, hostname, clienteSNMP, notificador=None, rep_db=None):
+    def __init__(self, hostname, clienteSNMP, notificador, rep_db):
+        """notificador y rep_db son obligatorios: sin ellos no se pueden gestionar las alertas."""
         super().__init__(hostname, clienteSNMP, notificador, rep_db)
 
     def obtener_datos(self, oid_dicc, oidtemp, oidtemp2):
@@ -43,99 +44,117 @@ class StateUPS(BaseUPS):
     def _hay_datos(self):
         return any(valor is not None for valor in self.datos.values())
 
-    def _gestionar_error_db(self, hay_error, msj_error, nombre_error_str, lista_mensajes):
+    def _detectar_transicion(self, hay_error, msj_error, nombre_error_str, transiciones):
         """
-        Gestiona la lógica de persistencia y notificación:
-        - Si hay error y no está activo -> Reactiva o Agrega y Notifica.
-        - Si no hay error y está activo -> Resuelve y Notifica.
+        Compara el estado del sensor con el guardado en la DB, sin escribir nada.
+        Si cambio, agrega a `transiciones` una tupla (nombre_error, accion, mensaje):
+        - Hay error y no esta activo -> "activar" (si ya existia resuelto) o "agregar".
+        - No hay error y esta activo -> "resolver".
+        La DB recien se actualiza en _confirmar_transiciones, si el mensaje se pudo enviar.
         """
-
-        # Se busca un error activo
         error_db_activo = self.rep_db.error_activo(self.hostname, nombre_error_str)
 
-        if hay_error:  # El sensor reporta un problema
-            if not error_db_activo:  # No hay errores ACTIVOS
-                # Si el error ya existía pero estaba resuelto, lo reactivamos
-                if self.rep_db.error_resuelto(
-                    self.hostname, nombre_error_str
-                ):  # hay error RESUELTO
-                    self.rep_db.activar_error(
-                        self.hostname, nombre_error_str
-                    )  # -> Se activa el error
-                else:  # No hay error RESUELTO tampoco
-                    self.rep_db.agregar_error(
-                        self.hostname, nombre_error_str
-                    )  # -> Se crea el evento
+        if hay_error and not error_db_activo:
+            # Si el error ya existio y se resolvio, se reactiva esa fila; si no, se crea
+            if self.rep_db.error_resuelto(self.hostname, nombre_error_str):
+                accion = "activar"
+            else:
+                accion = "agregar"
+            transiciones.append((nombre_error_str, accion, f"❌ {msj_error}"))
+        elif not hay_error and error_db_activo:
+            transiciones.append(
+                (
+                    nombre_error_str,
+                    "resolver",
+                    f"✅ [RESUELTO] {nombre_error_str} volvió a la normalidad.",
+                )
+            )
 
-                lista_mensajes.append(f"❌ {msj_error}")
-        else:  # El sensor reporta que todo está normal
-            if error_db_activo:  # habia un error ACTIVO
-                self.rep_db.resolver_error(
-                    self.hostname, nombre_error_str
-                )  # -> Se marca como resuelto
-                lista_mensajes.append(f"✅ [RESUELTO] {nombre_error_str} volvió a la normalidad.")
+    def _confirmar_transiciones(self, transiciones):
+        """Guarda en la DB las transiciones ya notificadas."""
+        acciones = {
+            "agregar": self.rep_db.agregar_error,
+            "activar": self.rep_db.activar_error,
+            "resolver": self.rep_db.resolver_error,
+        }
+        for nombre_error_str, accion, _mensaje in transiciones:
+            acciones[accion](self.hostname, nombre_error_str)
 
-    def _validar_metrica(self, nombre_metrica, funcion_validacion, error, lista_mensajes):
+    def _validar_metrica(self, nombre_metrica, funcion_validacion, error, transiciones):
         """
-        Valida una metrica y gestiona su error. Si la metrica no tiene dato no se hace nada:
-        el error no se activa ni se resuelve, su estado en la DB queda como estaba.
+        Valida una metrica y detecta si su error cambio. Si la metrica no tiene dato no se hace
+        nada: el error no se activa ni se resuelve, su estado en la DB queda como estaba.
         """
         valor = self.datos.get(nombre_metrica)
         if valor is None:
             return
         err, msg = funcion_validacion(valor)
-        self._gestionar_error_db(err, msg, error.name, lista_mensajes)
+        self._detectar_transicion(err, msg, error.name, transiciones)
 
     def validar_datos_y_notificar(self):
-        """Valida los datos recolectados y gestiona las notificaciones agrupadas."""
-        mensajes = []
+        """
+        Valida los datos, envia un solo mensaje con todas las transiciones del UPS y recien
+        despues las guarda en la DB. Si el envio falla no se guarda nada: en la proxima
+        ejecucion se detectan otra vez y se reintenta (al menos una vez, nunca se pierden).
+        """
+        transiciones = []
 
         # Respuesta SNMP: si el equipo no devolvio ningun dato no se valida nada mas
         hay_datos = self._hay_datos()
         err, msg = validar_respuesta_snmp(hay_datos)
-        self._gestionar_error_db(err, msg, Errores.SIN_RESPUESTA_SNMP.name, mensajes)
+        self._detectar_transicion(err, msg, Errores.SIN_RESPUESTA_SNMP.name, transiciones)
 
         if hay_datos:
             # Temperatura Baterías
             self._validar_metrica(
-                "battery", validar_temp_bateria, Errores.TEMPERATURA_BATERIA_ALTA, mensajes
+                "battery", validar_temp_bateria, Errores.TEMPERATURA_BATERIA_ALTA, transiciones
             )
 
             # Sensor Temperatura Ambiente e I/O
             if self.datos.get("temp") is not None:
                 err, msg = validar_temp_uio(self.datos["temp"])
                 # Evaluamos ambos estados posibles para el sensor UIO
-                self._gestionar_error_db(
+                self._detectar_transicion(
                     err if err == Errores.UIO_ROTO else None,
                     msg if err == Errores.UIO_ROTO else None,
                     Errores.UIO_ROTO.name,
-                    mensajes,
+                    transiciones,
                 )
-                self._gestionar_error_db(
+                self._detectar_transicion(
                     err if err == Errores.UIO_TEMPERATURA_ALTA else None,
                     msg if err == Errores.UIO_TEMPERATURA_ALTA else None,
                     Errores.UIO_TEMPERATURA_ALTA.name,
-                    mensajes,
+                    transiciones,
                 )
 
             # Carga de las baterías
-            self._validar_metrica("capacity", validar_carga, Errores.CARGA_MINIMA, mensajes)
+            self._validar_metrica("capacity", validar_carga, Errores.CARGA_MINIMA, transiciones)
 
             # Carga a la salida (Load)
-            self._validar_metrica("load", validar_load, Errores.LOAD_MAXIMO, mensajes)
+            self._validar_metrica("load", validar_load, Errores.LOAD_MAXIMO, transiciones)
 
             # Tiempo de autonomía
             self._validar_metrica(
-                "life", validar_tiempo_autonomia, Errores.AUTONOMIA_MINIMO, mensajes
+                "life", validar_tiempo_autonomia, Errores.AUTONOMIA_MINIMO, transiciones
             )
 
-        if mensajes:
-            encabezado = f"🔔 *Reporte de Estado: {self.hostname}*\n"
-            ahora = datetime.now()
-            fecha_string = ahora.strftime("%d/%m/%Y %H:%M:%S")
-            cuerpo = "\n".join(mensajes)
-            self.notificador.enviar_mensajes(
-                f"{encabezado}\n{cuerpo}\n\n📅 *Fecha informe:* {fecha_string}"
+        if not transiciones:
+            return
+
+        encabezado = f"🔔 *Reporte de Estado: {self.hostname}*\n"
+        fecha_string = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        cuerpo = "\n".join(mensaje for _nombre, _accion, mensaje in transiciones)
+        enviado = self.notificador.enviar_mensajes(
+            f"{encabezado}\n{cuerpo}\n\n📅 *Fecha informe:* {fecha_string}"
+        )
+
+        if enviado:
+            self._confirmar_transiciones(transiciones)
+        else:
+            logger.warning(
+                "No se pudo notificar %s (%s): se reintenta en la proxima ejecucion",
+                self.hostname,
+                ", ".join(nombre for nombre, _accion, _mensaje in transiciones),
             )
 
     def lineas_telegraf(self):

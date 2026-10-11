@@ -19,16 +19,17 @@ class Notificador:
 
     def enviar_mensajes(self, msg):
         """
-        Envia el mensaje al webhook de Google Chat. Si falla, el error se registra y no se relanza.
+        Envia el mensaje al webhook de Google Chat. Devuelve True si Google Chat lo acepto y
+        False si no se pudo enviar (el motivo queda en el log, la excepcion no se relanza).
         Usa urllib de la libreria estandar: para un POST con JSON no hace falta otra dependencia.
         """
         if not self.url:
             self.logger.error("URL de Google Chat no configurada (PASSWORDCHAT).")
-            return
+            return False
         # urlopen tambien abre file:// y otros esquemas: solo se acepta el webhook por https
         if not self.url.startswith("https://"):
             self.logger.error("La URL de Google Chat (PASSWORDCHAT) debe empezar con https://")
-            return
+            return False
 
         pedido = Request(
             self.url,
@@ -39,7 +40,7 @@ class Notificador:
         try:
             # Sin timeout, un Google Chat que no responde dejaria el hilo esperando para siempre
             with urlopen(pedido, timeout=c.HTTP_TIMEOUT):
-                pass
+                return True
         except HTTPError as e:
             # urlopen lanza HTTPError para las respuestas 4xx/5xx (por ejemplo 429 por limite de envio)
             self.logger.error(
@@ -49,3 +50,4 @@ class Notificador:
             )
         except Exception:
             self.logger.exception("Excepción al enviar mensaje a Google Chat")
+        return False
