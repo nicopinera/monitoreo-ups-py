@@ -2,23 +2,26 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from easysnmp import EasySNMPConnectionError
 
 import config.configuracion as c
 import main
-from test.conftest import ClienteSNMPFalso, NotificadorFalso
+from infraestructura.database import RepositorioDB
+from tests.dobles import ClienteSNMPFalso, NotificadorFalso
 
 RUTA_SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 
 
-def tarea_que_devuelve(*lineas):
+def tarea_que_devuelve(*lineas: str) -> Callable[[], list[str]]:
     return lambda: list(lineas)
 
 
-def tarea_que_falla(mensaje):
-    def tarea():
+def tarea_que_falla(mensaje: str) -> Callable[[], list[str]]:
+    def tarea() -> list[str]:
         raise RuntimeError(mensaje)
 
     return tarea
@@ -27,7 +30,7 @@ def tarea_que_falla(mensaje):
 # ------------------------------------------------------------------ import sin efectos secundarios
 
 
-def test_importar_main_no_configura_logging(tmp_path):
+def test_importar_main_no_configura_logging(tmp_path: Path) -> None:
     # En un proceso aparte: importar main no debe escribir nada ni crear la carpeta de logs
     carpeta_logs = tmp_path / "logs"
     entorno = dict(os.environ, PYTHONPATH=RUTA_SRC, MONITOREO_LOG_DIR=str(carpeta_logs))
@@ -38,6 +41,7 @@ def test_importar_main_no_configura_logging(tmp_path):
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,  # el codigo de salida se verifica abajo
     )
 
     assert resultado.returncode == 0
@@ -49,7 +53,7 @@ def test_importar_main_no_configura_logging(tmp_path):
 # ------------------------------------------------------------------ ejecutar_tareas
 
 
-def test_falla_en_una_tarea_se_registra_y_el_resto_sigue(caplog):
+def test_falla_en_una_tarea_se_registra_y_el_resto_sigue(caplog: pytest.LogCaptureFixture) -> None:
     tareas = [
         ("humedad", tarea_que_devuelve("linea humedad")),
         ("DC", tarea_que_falla("se rompio el DC")),
@@ -63,15 +67,15 @@ def test_falla_en_una_tarea_se_registra_y_el_resto_sigue(caplog):
     assert "se rompio el DC" in caplog.text  # el traceback queda en el log
 
 
-def tarea_lenta(segundos, linea):
-    def tarea():
+def tarea_lenta(segundos: float, linea: str) -> Callable[[], list[str]]:
+    def tarea() -> list[str]:
         time.sleep(segundos)
         return [linea]
 
     return tarea
 
 
-def test_las_tareas_corren_en_paralelo_y_respetan_el_orden():
+def test_las_tareas_corren_en_paralelo_y_respetan_el_orden() -> None:
     # Si corrieran una detras de otra tardarian 0.9 s; en paralelo, ~0.3 s.
     # La primera es la que mas tarda: el resultado igual sale en el orden de las tareas.
     tareas = [
@@ -92,7 +96,12 @@ def test_las_tareas_corren_en_paralelo_y_respetan_el_orden():
 # ------------------------------------------------------------------ crear_tareas + ejecutar_tareas
 
 
-def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(monkeypatch, caplog, notificador, repo_db):
+def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    notificador: NotificadorFalso,
+    repo_db: RepositorioDB,
+) -> None:
     host_roto = c.HOST_NAME_STATE[0]
     respuestas = {
         c.OIDB: "25",
@@ -104,7 +113,7 @@ def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(monkeypatch, caplog, no
         c.OID_HUMEDAD: "45",
     }
 
-    def fabrica_clientes(hostname):
+    def fabrica_clientes(hostname: str) -> ClienteSNMPFalso:
         # Igual que easysnmp con un nombre que no resuelve DNS
         if hostname == host_roto:
             raise EasySNMPConnectionError("couldn't create SNMP handle")
@@ -126,7 +135,7 @@ def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(monkeypatch, caplog, no
 # ------------------------------------------------------------------ codigo de salida de main
 
 
-def preparar_main(monkeypatch, tareas):
+def preparar_main(monkeypatch: pytest.MonkeyPatch, tareas: list[main.Tarea]) -> None:
     """main con tareas falsas, sin tocar el chat ni data/errores.db."""
     monkeypatch.setattr(main, "Notificador", lambda ruta_env: NotificadorFalso())
     monkeypatch.setattr(main, "RepositorioDB", lambda ruta_db: None)
@@ -142,13 +151,17 @@ def preparar_main(monkeypatch, tareas):
         ([tarea_que_devuelve(), tarea_que_devuelve()], 1),  # ningun equipo respondio -> 1
     ],
 )
-def test_codigo_de_salida(monkeypatch, tareas, codigo_esperado):
+def test_codigo_de_salida(
+    monkeypatch: pytest.MonkeyPatch, tareas: list[Callable[[], list[str]]], codigo_esperado: int
+) -> None:
     preparar_main(monkeypatch, [(f"t{i}", t) for i, t in enumerate(tareas)])
 
     assert main.main() == codigo_esperado
 
 
-def test_si_fallan_tareas_se_registra_el_resumen(monkeypatch, caplog):
+def test_si_fallan_tareas_se_registra_el_resumen(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     preparar_main(monkeypatch, [("a", tarea_que_devuelve("ok")), ("b", tarea_que_falla("x"))])
 
     main.main()
@@ -159,7 +172,9 @@ def test_si_fallan_tareas_se_registra_el_resumen(monkeypatch, caplog):
 # ------------------------------------------------------------------ salida a stdout
 
 
-def test_main_escribe_las_lineas_en_el_orden_de_las_tareas(monkeypatch, capsys):
+def test_main_escribe_las_lineas_en_el_orden_de_las_tareas(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     preparar_main(
         monkeypatch,
         [
@@ -177,17 +192,17 @@ def test_main_escribe_las_lineas_en_el_orden_de_las_tareas(monkeypatch, capsys):
 
 
 class StdoutQueRegistra:
-    def __init__(self):
-        self.escrituras = []
+    def __init__(self) -> None:
+        self.escrituras: list[str] = []
 
-    def write(self, texto):
+    def write(self, texto: str) -> None:
         self.escrituras.append(texto)
 
-    def flush(self):
+    def flush(self) -> None:
         pass
 
 
-def test_main_escribe_todo_con_una_sola_escritura(monkeypatch):
+def test_main_escribe_todo_con_una_sola_escritura(monkeypatch: pytest.MonkeyPatch) -> None:
     # Una sola escritura desde el hilo principal: no hay forma de que dos lineas se intercalen
     stdout = StdoutQueRegistra()
     monkeypatch.setattr(sys, "stdout", stdout)
@@ -198,7 +213,11 @@ def test_main_escribe_todo_con_una_sola_escritura(monkeypatch):
     assert stdout.escrituras == ["".join(f"linea {i}\n" for i in range(20))]
 
 
-def test_sin_metricas_no_escribe_nada(monkeypatch, capsys, caplog):
+def test_sin_metricas_no_escribe_nada(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     preparar_main(monkeypatch, [("a", tarea_que_devuelve())])
 
     assert main.main() == 1

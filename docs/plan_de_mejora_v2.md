@@ -201,7 +201,7 @@ LOGS_DIR = os.path.join(DATA_DIR, "logs")  # data/logs/ queda ignorado por el pa
 
 **Propuesta:** reemplazarlo por completo con el pipeline de la [§4](#4-cicd-calidad-y-seguridad).
 
-> **Estado: implementado** (pasos 8–10). El CI corre con uv y Python 3.10: `ruff check` + `ruff format --check`, `mypy` (todavía `allow_failure`), `pytest` con cobertura (`fail_under = 60`, hoy 95 %) y `pip-audit` sobre el lock exportado. Corre en los MR, en `main` y en pipelines programados. Queda pendiente la configuración de GitLab (§4.1) y endurecer reglas (paso 11).
+> **Estado: implementado** (pasos 8–10). El CI corre con uv y Python 3.10: `ruff check` + `ruff format --check`, `mypy` en modo `strict` sobre `src/` y `tests/`, `pytest` con cobertura (`fail_under = 90`, hoy 99 %) y `pip-audit` sobre el lock exportado; todos bloquean. Corre en los MR, en `main` y en el pipeline programado semanal (que sólo corre `pip-audit`).
 
 #### A8. Si falla el envío a Google Chat, la alerta se pierde para siempre
 
@@ -217,6 +217,7 @@ Además, si `notificador` es `None` (el valor por defecto del constructor), [sta
 >
 > - `enviar_mensajes` devuelve `True` si Google Chat aceptó el mensaje y `False` en cualquier otro caso: error HTTP (incluido el 429 por límite de envío), excepción, URL sin configurar o que no es `https://`.
 > - `StateUPS` valida en dos fases: `_detectar_transicion` compara sensor y base **sin escribir**; después se envía un solo mensaje con todas las transiciones del UPS y, **sólo si llegó**, `_confirmar_transiciones` las guarda. Si falla, no se guarda ninguna y se registra un warning; en la próxima ejecución se detectan otra vez y se reenvían.
+> - **Verificado en real (2026-10-10):** con ~18 avisos simultáneos, Google Chat respondió 429 (`RESOURCE_EXHAUSTED`) a 12; no se guardaron y quedaron pendientes para la ejecución siguiente.
 > - **Garantía "al menos una vez":** puede haber un duplicado si Google Chat recibió el mensaje pero la respuesta se perdió. Se prefiere a perder la alerta.
 > - **Sin URL configurada no se guarda nada:** las alertas quedan pendientes (con un error en el log en cada ejecución) y salen cuando se configura el `.env`.
 > - **Limitaciones aceptadas:** un problema que aparece y se resuelve mientras Google Chat falla no se avisa (para la base nunca cambió); y la `fecha` de la base es la del aviso, no la de la detección, así que la duración que muestre M10 puede quedar un poco corta. Si hace falta no perder ningún evento, el patrón *outbox* (tabla de pendientes) se puede sumar en M5.
@@ -325,7 +326,7 @@ class BaseUPS(ABC):
 
 #### M5. Modelo de datos de SQLite
 
-**Dónde:** [database.py](../src/infraestructura/database.py), [creacion_tabla_state.sql](../data/creacion_tabla_state.sql)
+**Dónde:** [database.py](../src/infraestructura/database.py), [schema.sql](../src/infraestructura/schema.sql)
 
 - Por cómo se usa, **nunca hay más de una fila por (host, tipo_error)**: `agregar_error` sólo se llama si no hay ninguna fila, y después `activar_error` y `resolver_error` modifican esa misma fila y pisan `fecha`. En la práctica es una **tabla de estado**, no un historial. Hay que elegir uno de los dos modelos:
   - **Estado:** `UNIQUE(ups_host, tipo_error)` + `INSERT ... ON CONFLICT DO UPDATE`. Las cinco funciones se reducen a `obtener_estado()` y `guardar_estado()`.
@@ -376,7 +377,7 @@ Los `Future` de `executor.submit` se descartan: cualquier excepción que escape 
   - `session.get(oid)` devuelve una **tupla** de `Result`: hay que usar `session.get(oid)[0].value`.
   - Las excepciones están en `ezsnmp.exceptions`: `TimeoutError`, `ConnectionError`, `NoSuchObjectError`, `NoSuchInstanceError`, `NoSuchNameError`.
 
-**Propuesta:** migrar a `ezsnmp` y Python 3.12 en el paso 13 (Docker), cuando la VM deje de usar el Python del sistema. Es urgente porque **Python 3.10 llega a fin de soporte en octubre de 2026**. El cambio queda contenido en [snmp_client.py](../src/infraestructura/snmp_client.py) y en los tests que importan excepciones de easysnmp ([test_snmp_client.py](../test/test_snmp_client.py), [test_main.py](../test/test_main.py)). Probar contra UPS reales con SNMPv1 antes de desplegar.
+**Propuesta:** migrar a `ezsnmp` y Python 3.12 en el paso 13 (Docker), cuando la VM deje de usar el Python del sistema. Es urgente porque **Python 3.10 llega a fin de soporte en octubre de 2026**. El cambio queda contenido en [snmp_client.py](../src/infraestructura/snmp_client.py) y en los tests que importan excepciones de easysnmp ([test_snmp_client.py](../tests/test_snmp_client.py), [test_main.py](../tests/test_main.py)). Probar contra UPS reales con SNMPv1 antes de desplegar.
 
 #### M10. Mensajes de Google Chat más claros
 
@@ -474,9 +475,9 @@ Depende de M6 (que el dominio devuelva alertas estructuradas) y de A8 (que el en
 
 | ID  | Problema                                                                                                                                                                                                                                                    | Propuesta                                                                                                                                                                                                                                                                           |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| B1  | [test_db.py](../test/test_db.py) importa `src.infraestructura...` mientras el código importa `infraestructura...`, así que el mismo módulo se carga dos veces con nombres distintos.                                                                        | Importar siempre sin el prefijo `src.` (`pythonpath = ["src"]` ya lo permite). **No** se reestructura a `src/monitoreo_ups/`: el proyecto no se instala como paquete (§3), así que los nombres genéricos (`config`, `core`) no chocan con nada.                                     |
+| B1  | [test_db.py](../tests/test_db.py) importa `src.infraestructura...` mientras el código importa `infraestructura...`, así que el mismo módulo se carga dos veces con nombres distintos.                                                                       | Importar siempre sin el prefijo `src.` (`pythonpath = ["src"]` ya lo permite). **No** se reestructura a `src/monitoreo_ups/`: el proyecto no se instala como paquete (§3), así que los nombres genéricos (`config`, `core`) no chocan con nada.                                     |
 | B2  | La carpeta [scrip/](../scrip/) tiene pruebas sueltas (`loggerv1.py` está vacío).                                                                                                                                                                            | Eliminarla.                                                                                                                                                                                                                                                                         |
-| B3  | [test_main.py](../test/test_main.py) es un placeholder. No hay tests de drivers, notificador, cliente SNMP ni del flujo de `main`.                                                                                                                          | Tests de drivers con un `ClienteSNMP` falso (fake), del notificador con `responses`/mocks y del formateo de line protocol. Renombrar `test/` a `tests/`: `test` es también un paquete de la librería estándar y los imports `from test.conftest ...` pueden resolver al equivocado. |
+| B3  | [test_main.py](../tests/test_main.py) es un placeholder. No hay tests de drivers, notificador, cliente SNMP ni del flujo de `main`.                                                                                                                         | Tests de drivers con un `ClienteSNMP` falso (fake), del notificador con `responses`/mocks y del formateo de line protocol. Renombrar `test/` a `tests/`: `test` es también un paquete de la librería estándar y los imports `from test.conftest ...` pueden resolver al equivocado. |
 | B4  | Las comparaciones `== None` / `!= None` aparecen en [hum_ups.py:15](../src/drivers/hum_ups.py#L15) y en los tests.                                                                                                                                          | `is None` (`ruff --fix`).                                                                                                                                                                                                                                                           |
 | B5  | Faltan type hints en todo el proyecto.                                                                                                                                                                                                                      | Agregarlos de forma progresiva, con `mypy` en el CI (§4).                                                                                                                                                                                                                           |
 | B6  | El [Makefile](../Makefile) instala con `sudo apt`, `run_hum` y `run_state` son idénticos.                                                                                                                                                                   | Reemplazarlo por objetivos basados en `uv`: `make lint`, `make test`, `make build`, `make run`.                                                                                                                                                                                     |
@@ -543,39 +544,14 @@ monitoreo-ups/                      # en la VM: /etc/telegraf/monitoreo-ups
 
 ### 3.3 `pyproject.toml`
 
-Configuración actual (ver [pyproject.toml](../pyproject.toml)). Arranca con reglas mínimas para que el CI pueda bloquear desde el primer día:
+Configuración actual: ver [pyproject.toml](../pyproject.toml). Se arrancó con reglas mínimas (paso 8) y se endureció en el paso 11:
 
-| Herramienta | Hoy                                                     | Objetivo (paso 11)                                                               |
-| ----------- | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| ruff        | `E4`, `E7`, `E9`, `F`, `I` (reglas por defecto + isort) | Sumar `W`, `B`, `UP`, `SIM`, `N`, `S`, `PL`, `PT`, `RUF`, `LOG`, `G` de a grupos |
-| mypy        | modo por defecto sobre `src/`; pasa sin errores         | `strict = true`, `warn_unreachable`, incluir los tests                           |
-| coverage    | `fail_under = 60`; cobertura real 95 %                  | Subir `fail_under` cerca del valor real; sumar `exclude_also`                    |
-| pytest      | `testpaths = ["test"]`                                  | `tests/` (paso 7)                                                                |
-
-Reglas de ruff a sumar en el paso 11, con su propósito:
-
-```toml
-[tool.ruff.lint]
-select = [
-    "E", "W",   # pycodestyle
-    "F",        # pyflakes
-    "I",        # isort
-    "B",        # bugbear
-    "UP",       # pyupgrade
-    "SIM",      # simplify
-    "N",        # pep8-naming
-    "S",        # bandit (seguridad)
-    "PL",       # pylint
-    "PT",       # pytest-style
-    "RUF",
-    "LOG",      # buenas prácticas de logging
-    "G",        # formato de mensajes de logging (evita f-strings, ver M1)
-]
-ignore = ["PLR2004"]   # magic values: los umbrales viven en config
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "PLR2004"]
-```
+| Herramienta | Configuración                                                                                                                             |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| ruff        | `E`, `W`, `F`, `I`, `B`, `UP`, `SIM`, `N`, `S`, `PL`, `PT`, `RUF`, `LOG`, `G`. Se ignora `PLR2004` (umbrales en config) y `S101` en tests |
+| mypy        | `strict = true` y `warn_unreachable` sobre `src/` y `tests/`                                                                              |
+| coverage    | `fail_under = 90` (cobertura real 99 %), con `exclude_also` para `if __name__ == "__main__"` y `@abstractmethod`                          |
+| pytest      | `testpaths = ["tests"]`, `pythonpath = ["src"]`                                                                                           |
 
 Notas:
 
@@ -605,7 +581,7 @@ Configuración en GitLab:
 
 ### 4.2 `.gitlab-ci.yml`
 
-> **Estado: implementado** (paso 10), ver [.gitlab-ci.yml](../.gitlab-ci.yml). Jobs: `ruff`, `mypy` (con `allow_failure: true` hasta el paso 11), `pytest` con reportes JUnit y Cobertura en el MR, y `pip-audit`. El CI no instala `libsnmp-dev`, porque el wheel de easysnmp para 3.10 ya incluye `libnetsnmp` (M9).
+> **Estado: implementado** (paso 10), ver [.gitlab-ci.yml](../.gitlab-ci.yml). Jobs: `ruff`, `mypy` (`strict`, bloqueante desde el paso 11), `pytest` con reportes JUnit y Cobertura en el MR, y `pip-audit`. El pipeline programado sólo corre `pip-audit` (los demás jobs tienen `rules: $CI_PIPELINE_SOURCE != "schedule"` en la plantilla `.uv`). El CI no instala `libsnmp-dev`, porque el wheel de easysnmp para 3.10 ya incluye `libnetsnmp` (M9).
 
 Pendiente:
 
@@ -623,13 +599,6 @@ Pendiente:
     script:
       - docker build -t monitoreo-ups:ci .
       - docker run --rm --network none --entrypoint python monitoreo-ups:ci -c "import main"
-  ```
-
-- **Pipeline programado sólo para auditar:** hoy el schedule semanal corre todos los jobs. Para que corra sólo `pip-audit`, agregar a `ruff`, `mypy` y `pytest`:
-
-  ```yaml
-  rules:
-    - if: $CI_PIPELINE_SOURCE != "schedule"
   ```
 
 - **Opcional:** reporte de Code Quality de ruff en el MR (`ruff check --output-format=gitlab --output-file=gl-code-quality.json`, publicado como `artifacts:reports:codequality`).
@@ -990,11 +959,11 @@ Cada paso es **un MR independiente**, en este orden. El orden sigue tres criteri
 | ✅ 4  | M2 + M8 — Salida desde el hilo principal y control de futures           | S      | 3          |
 | ✅ 5  | A5 — Timeouts SNMP/HTTP                                                 | S      | —          |
 | ✅ 6  | A8 — No perder alertas si falla Google Chat                             | S      | —          |
-| ◐ 7   | B1 + B3 + B6 + B7 — Imports, `tests/`, SQL a `src/` y Makefile          | S      | 1–6        |
+| ✅ 7  | B1 + B3 + B6 + B7 — Imports, `tests/`, SQL a `src/` y Makefile          | S      | 1–6        |
 | ✅ 8  | uv + `pyproject.toml` + `uv.lock`                                       | S      | 7          |
 | ✅ 9  | `ruff --fix` + `ruff format` (sólo formato)                             | S      | 8          |
 | ✅ 10 | A7 — CI nuevo (ruff, pytest + cobertura, pip-audit; mypy no bloqueante) | M      | 9          |
-| 11    | B5 — Type hints, mypy `strict` y reglas completas de ruff               | M      | 10         |
+| ✅ 11 | B5 — Type hints, mypy `strict` y reglas completas de ruff               | M      | 10         |
 | 12    | A6 + M7 — Configuración y secretos por variables de entorno             | M      | 8          |
 | 13    | Docker + `ezsnmp` y Python 3.12 (M9)                                    | M      | 12         |
 | 14    | Deploy automático (cron, Telegraf con `docker compose run`, corte)      | M      | 13         |
@@ -1022,17 +991,22 @@ Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rá
 
 ### Etapa 2 — Herramientas
 
-- [ ] **7. Ordenar la estructura (sin convertirla en paquete, §3.1):**
+- [x] **7. Ordenar la estructura (sin convertirla en paquete, §3.1):**
   - [x] Imports de los tests sin el prefijo `src.` (B1) y sin `import *` en `test_validacion.py`.
   - [x] Makefile basado en uv (B6).
-  - [ ] `test/` → `tests/` (B3) y actualizar `testpaths`, `src` de ruff y los imports `from test.conftest`.
-  - [ ] Mover el SQL a `src/infraestructura/schema.sql` (A6).
-  - [ ] Quitar los shebangs `#!/usr/bin/python3` de los 10 módulos de `src/` (B7).
+  - [x] `test/` → `tests/` (B3). Los dobles de prueba (`ClienteSNMPFalso`, `NotificadorFalso`) pasaron de `conftest.py` a `tests/dobles.py`: `conftest` es para fixtures y no conviene importarlo.
+  - [x] SQL movido a `src/infraestructura/schema.sql` (A6), leído relativo a `__file__`. Como `data/` ya no tiene archivos versionados, `RepositorioDB` crea la carpeta si no existe (en un clon nuevo no está).
+  - [x] Shebangs quitados de los 11 módulos de `src/` y `chmod -x` de `main.py` (B7).
 - [x] **8. uv:** `pyproject.toml` (§3.3), `uv.lock`, `.python-version` (3.10, ver M9); borrar `pytest.ini`.
 - [x] **9. Formato:** `ruff check --fix` + `ruff format` en un MR que **sólo** cambie formato, para que los refactors posteriores tengan diffs limpios. Con las reglas mínimas de §3.3; el resto se suma en el paso 11.
 - [x] **10. A7 — CI:** nuevo `.gitlab-ci.yml` (§4.2) con ruff, pytest + cobertura y pip-audit bloqueantes; mypy con `allow_failure: true` hasta el paso 11.
   - [X] Configuración de GitLab (§4.1): proteger `main`, activar "Pipelines must succeed" y programar el pipeline semanal.
-- [ ] **11. B5:** mypy ya pasa en modo por defecto, así que se puede quitar el `allow_failure` enseguida. Después: type hints hasta que pase con `strict = true`, sumar los tests a mypy, ampliar las reglas de ruff de a grupos (§3.3) y subir `fail_under`. Va antes de los refactors grandes porque es cuando más ayuda.
+- [x] **11. B5:** type hints en todo `src/` y `tests/`; mypy `strict` bloqueante en el CI; todas las reglas de ruff de §3.3; `fail_under = 90`. Cambios de código que trajo:
+  - `clienteSNMP` → `cliente_snmp` (convención de nombres, regla `N803`).
+  - `BaseUPS.obtener_datos/ejecutar` declaran `*args: Any, **kwargs: Any` para que mypy acepte que cada driver tenga sus parámetros. Es provisorio hasta M4.
+  - Los dobles de prueba heredan de las clases reales (`NotificadorFalso(Notificador)`) para poder pasarlos donde el código espera esos tipos.
+  - `RepositorioDB` concentra las consultas en `_consultar_una`/`_modificar` (mismo SQL y comportamiento; el manejo de conexiones sigue pendiente en M5).
+  - `notificador.py` lleva `# noqa: S310` en `urlopen`: el esquema `https://` se valida antes.
 
 ### Etapa 3 — Despliegue automático
 

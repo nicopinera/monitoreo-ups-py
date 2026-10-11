@@ -11,3 +11,5 @@ logs/
 htmlcov/
 coverage.xml
 report.xml
+requirements.txt
+.uv-cache/

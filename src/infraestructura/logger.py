@@ -1,5 +1,3 @@
-#!/usr/bin/python3
-
 import logging
 import os
 import sys
@@ -10,13 +8,13 @@ import config.configuracion as c
 FORMATO_LOG = "%(asctime)s %(levelname)s %(name)s [%(threadName)s] %(message)s"
 
 
-def _nivel_desde_texto(texto):
+def _nivel_desde_texto(texto: str) -> int:
     """Convierte "DEBUG", "info", etc. al nivel de logging. Si no es valido usa INFO."""
     nivel = logging.getLevelName(str(texto).upper())
     return nivel if isinstance(nivel, int) else logging.INFO
 
 
-def configurar_logger(log_dir=None, nivel=None):
+def configurar_logger(log_dir: str | None = None, nivel: str | None = None) -> None:
     """
     Configura el logging global del proceso: todo va al archivo rotativo
     <log_dir>/monitoreo.log desde `nivel`. No se escribe nada por consola:
@@ -27,12 +25,13 @@ def configurar_logger(log_dir=None, nivel=None):
     nivel: nivel minimo del archivo. Por defecto la variable de entorno LOG_LEVEL o INFO.
     """
     log_dir = log_dir or os.getenv(c.VAR_LOG_DIR) or c.LOGS_DIR
-    nivel = _nivel_desde_texto(nivel or os.getenv(c.VAR_LOG_LEVEL) or "INFO")
+    nivel_log = _nivel_desde_texto(nivel or os.getenv(c.VAR_LOG_LEVEL) or "INFO")
     formato = logging.Formatter(FORMATO_LOG)
 
     # Si no se puede escribir el archivo se sigue con stderr: el logging nunca debe frenar
     # el monitoreo, y sin el archivo los errores no quedarian en ningun lado
-    error_archivo = None
+    error_archivo: OSError | None = None
+    handler: logging.Handler
     try:
         os.makedirs(log_dir, exist_ok=True)
         handler = RotatingFileHandler(
@@ -47,7 +46,7 @@ def configurar_logger(log_dir=None, nivel=None):
         handler.setLevel(logging.WARNING)
     handler.setFormatter(formato)
 
-    logging.basicConfig(level=nivel, handlers=[handler], force=True)
+    logging.basicConfig(level=nivel_log, handlers=[handler], force=True)
 
     if error_archivo:
         logging.getLogger(__name__).warning(
