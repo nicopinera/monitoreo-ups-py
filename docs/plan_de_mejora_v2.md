@@ -99,7 +99,7 @@ Todos los drivers inicializan las métricas en `0` y las dejan así si la consul
 >
 > - `main` arma una tarea por equipo, y cada tarea crea su propio cliente SNMP. Esto quedó confirmado: con un host que no resuelve DNS, `Session()` lanza `EasySNMPConnectionError`, y antes eso tiraba abajo todo.
 > - Cada tarea corre dentro de `_ejecutar_protegido`, que registra la excepción y sigue con las demás.
-> - Código de salida: 0 si al menos una tarea terminó bien, 1 si fallaron todas o si falla la inicialización compartida (notificador, base de datos).
+> - Código de salida: 0 si al menos una tarea terminó bien, 1 si fallaron todas o si falla la inicialización compartida (notificador, base de datos). Con M2 la regla pasó a ser "0 si se obtuvo al menos una métrica".
 > - El `try/except` de `StateUPS.ejecutar` pasó a `main`, así todos los drivers se protegen igual.
 > - También se lee el resultado de cada future, que era parte de M8.
 
@@ -151,6 +151,15 @@ Telegraf corta el comando al llegar a su `timeout` (5 s por defecto en `inputs.e
 - Medir la duración total de la ejecución y ajustar `timeout` e `interval` de Telegraf con margen (ver [§5.4](#54-ejecución-desde-telegraf)).
 - Subir `max_workers` (por ejemplo a 13) y hacerlo configurable.
 
+> **Estado: implementado** (paso 5).
+>
+> - **SNMP:** `timeout=1`, `retries=1` (constantes `SNMP_TIMEOUT`/`SNMP_RETRIES` en `configuracion.py`; pasan a variables de entorno en el paso 12). Un OID sin respuesta cuesta 2 s en lugar de 4.
+> - **Corte por host:** después del primer timeout, `ClienteSNMP` no consulta más OIDs de ese host en la ejecución. Sólo corta por timeout: un `NOSUCH*` o un error genérico no cortan, porque el fallback `OIDT → OIDTNEW` depende de eso. Un UPS caído pasa de 28 s y 7 warnings a 2 s y 1 warning.
+> - **Paralelismo:** `MAX_WORKERS = 13`, y humedad y DC pasaron al mismo pool que los UPS, así sus timeouts no se suman al resto.
+> - **Google Chat:** se reemplazó httplib2 por `urllib.request` de la librería estándar, con `timeout=10` (`HTTP_TIMEOUT`). Se eliminaron `httplib2`, `pyparsing` y `types-httplib2`. Sólo se acepta una URL `https://` (`urlopen` también abre `file://`). Se quitó el `time.sleep(1)`: con varios hilos no espaciaba los envíos. Si Google Chat rechaza por límite de envío (429), el aviso se pierde hasta que se haga A8.
+> - **Medido:** sin respuesta de ningún UPS de state, la ejecución completa tardó 6,1 s (incluye el arranque de `uv run`); antes superaba los 120 s.
+> - **Telegraf** hoy tiene `interval = "60s"` y `timeout = "60s"`. Con el código anterior se perdía la ejecución si se caía el DC (52 s secuenciales) o la red (~140 s). Ahora alcanza con `timeout = "30s"`, que deja margen y evita que una ejecución colgada se acerque al intervalo.
+
 #### A6. Rutas de la base y del `.env` no preparadas para Docker
 
 **Dónde:** [configuracion.py:90-93](../src/config/configuracion.py#L90-L93), [notificador.py:11](../src/infraestructura/notificador.py#L11)
@@ -192,6 +201,8 @@ LOGS_DIR = os.path.join(DATA_DIR, "logs")  # data/logs/ queda ignorado por el pa
 
 **Propuesta:** reemplazarlo por completo con el pipeline de la [§4](#4-cicd-calidad-y-seguridad).
 
+> **Estado: implementado** (pasos 8–10). El CI corre con uv y Python 3.10: `ruff check` + `ruff format --check`, `mypy` (todavía `allow_failure`), `pytest` con cobertura (`fail_under = 60`, hoy 95 %) y `pip-audit` sobre el lock exportado. Corre en los MR, en `main` y en pipelines programados. Queda pendiente la configuración de GitLab (§4.1) y endurecer reglas (paso 11).
+
 #### A8. Si falla el envío a Google Chat, la alerta se pierde para siempre
 
 **Dónde:** [state_ups.py:50-64](../src/drivers/state_ups.py#L50-L64), [state_ups.py:96-101](../src/drivers/state_ups.py#L96-L101), [notificador.py:34-37](../src/infraestructura/notificador.py#L34-L37)
@@ -201,6 +212,15 @@ LOGS_DIR = os.path.join(DATA_DIR, "logs")  # data/logs/ queda ignorado por el pa
 Además, si `notificador` es `None` (el valor por defecto del constructor), [state_ups.py:101](../src/drivers/state_ups.py#L101) lanza `AttributeError`.
 
 **Propuesta:** que `enviar_mensajes` devuelva `bool` y persistir el cambio de estado **sólo si el envío fue exitoso**, o agregar una columna `notificado` y reintentar los pendientes en cada ejecución. Usar un notificador "nulo" (Null Object) en lugar de `None`.
+
+> **Estado: implementado** (paso 6), con la opción "guardar sólo si se envió".
+>
+> - `enviar_mensajes` devuelve `True` si Google Chat aceptó el mensaje y `False` en cualquier otro caso: error HTTP (incluido el 429 por límite de envío), excepción, URL sin configurar o que no es `https://`.
+> - `StateUPS` valida en dos fases: `_detectar_transicion` compara sensor y base **sin escribir**; después se envía un solo mensaje con todas las transiciones del UPS y, **sólo si llegó**, `_confirmar_transiciones` las guarda. Si falla, no se guarda ninguna y se registra un warning; en la próxima ejecución se detectan otra vez y se reenvían.
+> - **Garantía "al menos una vez":** puede haber un duplicado si Google Chat recibió el mensaje pero la respuesta se perdió. Se prefiere a perder la alerta.
+> - **Sin URL configurada no se guarda nada:** las alertas quedan pendientes (con un error en el log en cada ejecución) y salen cuando se configura el `.env`.
+> - **Limitaciones aceptadas:** un problema que aparece y se resuelve mientras Google Chat falla no se avisa (para la base nunca cambió); y la `fecha` de la base es la del aviso, no la de la detección, así que la duración que muestre M10 puede quedar un poco corta. Si hace falta no perder ningún evento, el patrón *outbox* (tabla de pendientes) se puede sumar en M5.
+> - En lugar del Null Object, `notificador` y `rep_db` pasaron a ser **obligatorios** en `StateUPS`: si faltan, falla al crear el driver y no en medio de una alerta.
 
 ### 2.3 Prioridad media
 
@@ -242,6 +262,7 @@ Nivel por defecto `WARNING`: en una ejecución normal no se escribe nada, y lo q
 > **Estado: implementado**, con un cambio respecto a la propuesta: además de stderr, los logs van a un **archivo rotativo** (`logs/monitoreo.log`, 5 MB × 5). El motivo es que Telegraf sólo muestra el stderr cuando la ejecución falla, y los warnings de una ejecución exitosa se perderían.
 >
 > - stderr muestra desde `WARNING`; el archivo, desde `LOG_LEVEL` (por defecto `INFO`).
+> - **Cambio posterior:** los logs van **sólo al archivo**, no se escribe nada por consola. stderr se usa únicamente como respaldo si no se puede abrir el archivo. Con un UPS caído, cada OID generaba un warning en la consola. Contra: cuando la ejecución falla, Telegraf ya no muestra el motivo en su log; hay que mirar `monitoreo.log`.
 > - La carpeta se puede cambiar con `MONITOREO_LOG_DIR`.
 > - Si no se puede crear el archivo, se sigue sólo con stderr.
 >
@@ -254,6 +275,13 @@ Nivel por defecto `WARNING`: en una ejecución normal no se escribe nada, y lo q
 Los `StateUPS` corren en 6 hilos y cada uno hace `print()`. En CPython, `print` hace **dos escrituras** (el texto y después el `\n`), así que dos hilos pueden intercalarse y producir `lineaAlineaB\n\n`, que es inválido para Telegraf. Es poco frecuente, pero cuando pasa se pierde la ejecución entera.
 
 **Propuesta:** que `ejecutar()` **devuelva** las líneas (o un `dict` de métricas) y que `main` las imprima desde el hilo principal con un único `sys.stdout.write("\n".join(lineas) + "\n")`. Esto además facilita testear los drivers.
+
+> **Estado: implementado** (junto con M8, paso 4).
+>
+> - Los drivers ya no imprimen: `imprimir_telegraf()` pasó a ser `lineas_telegraf() -> list[str]` y `ejecutar()` devuelve las líneas. Se eligió devolver líneas y no un `dict`: el formateo centralizado queda para A3/M4.
+> - Las líneas vuelven al hilo principal por los futures. `main.escribir_lineas` las escribe todas juntas al final, con una sola escritura, en el orden de las tareas (humedad, DC y los UPS en el orden de la configuración), no en el que terminan.
+> - Si falla la validación o la notificación de un UPS (base de datos, Google Chat), el error se registra y **sus métricas se publican igual**.
+> - **Código de salida:** 0 si se obtuvo al menos una métrica; 1 si no hay ninguna. Telegraf descarta toda la salida si el código no es 0, así que una tarea que falla ya no puede llevarse puestas las métricas de las demás. Cambio de comportamiento: si no responde ningún equipo, ahora sale con 1 y Telegraf lo muestra como error en su log (antes salía con 0 sin métricas).
 
 #### M3. El UPS trifásico del DC no tiene alertas
 
@@ -333,11 +361,22 @@ class BaseUPS(ABC):
 
 Los `Future` de `executor.submit` se descartan: cualquier excepción que escape del `try` de `StateUPS.ejecutar` se pierde sin registrarse. Hay que guardar los futures, iterar con `as_completed` y registrar los fallos. Esto encaja con M2: cada future devuelve sus líneas.
 
+> **Estado: implementado.** En A2 se empezó a leer el resultado de cada future; con M2 cada future devuelve las líneas de su equipo, o `None` si la tarea lanzó una excepción (que queda registrada con traceback). Se leen en el orden de las tareas en lugar de usar `as_completed`, para que la salida sea reproducible.
+
 #### M9. `easysnmp` sin mantenimiento
 
 `easysnmp` (0.2.6) no tiene releases desde hace años, es una extensión en C que necesita `libsnmp-dev` para compilarse y en la VM se instala desde `apt` (`python3-easysnmp`). En una imagen Docker con un Python más nuevo, la compilación puede fallar.
 
-**Propuesta:** en el primer build de la imagen, validar que compila contra `python:3.12-slim-bookworm`. A mediano plazo, evaluar `ezsnmp` (un fork mantenido con API casi idéntica) o `pysnmp` (Python puro, sin dependencias de C). Como `ClienteSNMP` ya aísla la librería, el cambio queda contenido en un solo archivo.
+**Verificado al migrar a uv (paso 8):**
+
+- `easysnmp` 0.2.6 publica wheels **sólo hasta Python 3.10**. En 3.12 hay que compilarlo desde el código fuente, y su `setup.py` usa `distutils` (eliminado en 3.12) y `setuptools.command.test` (eliminado en setuptools 72), así que **no instala**. En la VM funciona porque el paquete de `apt` viene parcheado.
+- El wheel para 3.10 (`manylinux`) **incluye `libnetsnmp`**, así que no hace falta `libsnmp-dev` ni compilador. Por eso el proyecto quedó, por ahora, en **Python 3.10** (`.python-version`), sin cambios de código.
+- `ezsnmp` 2.4 publica wheels para 3.10–3.14 que también incluyen `libnetsnmp`. Su API cambia un poco respecto de easysnmp:
+  - `Session(hostname=..., version=..., community=..., timeout=..., retries=...)` es casi igual.
+  - `session.get(oid)` devuelve una **tupla** de `Result`: hay que usar `session.get(oid)[0].value`.
+  - Las excepciones están en `ezsnmp.exceptions`: `TimeoutError`, `ConnectionError`, `NoSuchObjectError`, `NoSuchInstanceError`, `NoSuchNameError`.
+
+**Propuesta:** migrar a `ezsnmp` y Python 3.12 en el paso 13 (Docker), cuando la VM deje de usar el Python del sistema. Es urgente porque **Python 3.10 llega a fin de soporte en octubre de 2026**. El cambio queda contenido en [snmp_client.py](../src/infraestructura/snmp_client.py) y en los tests que importan excepciones de easysnmp ([test_snmp_client.py](../test/test_snmp_client.py), [test_main.py](../test/test_main.py)). Probar contra UPS reales con SNMPv1 antes de desplegar.
 
 #### M10. Mensajes de Google Chat más claros
 
@@ -458,7 +497,7 @@ Se mantiene la estructura actual de `src/`. El proyecto es una aplicación que s
 monitoreo-ups/                      # en la VM: /etc/telegraf/monitoreo-ups
 ├── pyproject.toml
 ├── uv.lock                         # versionado
-├── .python-version                 # 3.12
+├── .python-version                 # 3.10 por ahora; 3.12 con ezsnmp (M9)
 ├── Dockerfile
 ├── .dockerignore
 ├── compose.yaml                    # cómo se ejecuta: volumen, .env, usuario, red (§5.4)
@@ -482,99 +521,40 @@ monitoreo-ups/                      # en la VM: /etc/telegraf/monitoreo-ups
 
 ### 3.2 Pasos
 
-1. Instalar uv en las máquinas de desarrollo (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
-2. Mover el SQL a `src/infraestructura/schema.sql` y leerlo con una ruta relativa a `__file__` (A6).
-3. Crear el `pyproject.toml` (§3.3) y fijar la versión de Python con `uv python pin 3.12`.
-4. `uv lock` y versionar `uv.lock`.
-5. `uv sync` para crear `.venv/` con todas las dependencias, incluidas las de desarrollo.
-6. Borrar `pytest.ini` (su configuración pasa al `pyproject.toml`) y adaptar el Makefile.
-7. Comandos del día a día:
+> **Estado: implementado** (pasos 8 y 9), salvo mover el SQL, que queda para el paso 7.
+
+1. Instalar uv en las máquinas de desarrollo (`curl -LsSf https://astral.sh/uv/install.sh | sh`) y agregar `~/.local/bin` al `PATH`.
+2. `uv init --bare` y `uv python pin 3.10` (ver M9 sobre la versión).
+3. `uv add` de las dependencias de producción y `uv add --dev` de las de desarrollo: crea `uv.lock` y `.venv/`.
+4. Configuración de pytest, coverage, ruff y mypy en el `pyproject.toml`; borrar `pytest.ini`.
+5. Makefile basado en uv (B6): `make check` corre lo mismo que el CI.
+6. Comandos del día a día:
 
    ```bash
    uv run python src/main.py     # ejecutar
-   uv run pytest                 # tests + cobertura
+   uv run pytest --cov           # tests + cobertura
    uv run ruff check --fix .     # lint
    uv run ruff format .          # formato
    uv run mypy                   # tipado
    uv add <paquete>              # nueva dependencia (actualiza pyproject y lock)
    uv lock --upgrade             # actualizar dependencias
+   make check                    # lint + tipado + tests + auditoría, igual que el CI
    ```
 
-> Para compilar `easysnmp` localmente sigue haciendo falta `sudo apt install build-essential libsnmp-dev`.
+### 3.3 `pyproject.toml`
 
-### 3.3 `pyproject.toml` propuesto
+Configuración actual (ver [pyproject.toml](../pyproject.toml)). Arranca con reglas mínimas para que el CI pueda bloquear desde el primer día:
+
+| Herramienta | Hoy                                                     | Objetivo (paso 11)                                                               |
+| ----------- | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| ruff        | `E4`, `E7`, `E9`, `F`, `I` (reglas por defecto + isort) | Sumar `W`, `B`, `UP`, `SIM`, `N`, `S`, `PL`, `PT`, `RUF`, `LOG`, `G` de a grupos |
+| mypy        | modo por defecto sobre `src/`; pasa sin errores         | `strict = true`, `warn_unreachable`, incluir los tests                           |
+| coverage    | `fail_under = 60`; cobertura real 95 %                  | Subir `fail_under` cerca del valor real; sumar `exclude_also`                    |
+| pytest      | `testpaths = ["test"]`                                  | `tests/` (paso 7)                                                                |
+
+Reglas de ruff a sumar en el paso 11, con su propósito:
 
 ```toml
-[project]
-name = "monitoreo-ups"
-version = "2.0.0"
-description = "Monitoreo SNMP de UPS del datacenter PSI con salida en line protocol para Telegraf/InfluxDB y alertas a Google Chat."
-readme = "README.md"
-requires-python = ">=3.12,<3.14"
-authors = [
-    { name = "Nicolas Piñera" },
-    { name = "Juan Vizgarra" },
-]
-license = { text = "Propietario" }
-classifiers = [
-    "Private :: Do Not Upload",
-    "Programming Language :: Python :: 3.12",
-]
-dependencies = [
-    "easysnmp>=0.2.6",
-    "httplib2>=0.22",        # se puede eliminar si se migra a requests (A5)
-    "python-dotenv>=1.0",    # sólo para desarrollo local; en Docker se usa env_file de compose
-    # seqlog se elimina: Seq no se usa (M1)
-]
-
-[dependency-groups]
-dev = [
-    "pytest>=8.3",
-    "pytest-cov>=5.0",
-    "ruff>=0.7",
-    "mypy>=1.13",
-    "pip-audit>=2.7",
-    "types-httplib2",
-]
-
-[tool.uv]
-package = false          # aplicación, no librería: uv sólo instala las dependencias
-default-groups = ["dev"]
-
-# ------------------------------------------------------------------ pytest
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]
-addopts = [
-    "-ra",
-    "--strict-markers",
-    "--strict-config",
-    "--cov=src",
-    "--cov-report=term-missing",
-    "--cov-report=xml",
-    "--junitxml=report.xml",
-]
-
-# ------------------------------------------------------------------ coverage
-[tool.coverage.run]
-branch = true
-source = ["src"]
-
-[tool.coverage.report]
-fail_under = 80          # empezar en el valor real actual y subirlo en cada fase
-show_missing = true
-exclude_also = [
-    "if __name__ == .__main__.:",
-    "raise NotImplementedError",
-    "@abstractmethod",
-]
-
-# ------------------------------------------------------------------ ruff
-[tool.ruff]
-target-version = "py312"
-line-length = 100
-src = ["src", "tests"]
-
 [tool.ruff.lint]
 select = [
     "E", "W",   # pycodestyle
@@ -591,35 +571,15 @@ select = [
     "LOG",      # buenas prácticas de logging
     "G",        # formato de mensajes de logging (evita f-strings, ver M1)
 ]
-ignore = [
-    "PLR2004",  # magic values: los umbrales viven en config
-]
+ignore = ["PLR2004"]   # magic values: los umbrales viven en config
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004"]
-
-[tool.ruff.format]
-quote-style = "double"
-
-# ------------------------------------------------------------------ mypy
-[tool.mypy]
-python_version = "3.12"
-files = ["src", "tests"]
-mypy_path = "src"
-explicit_package_bases = true   # src/ no tiene __init__.py: los paquetes son config, core, ...
-strict = true
-warn_unreachable = true
-pretty = true
-
-[[tool.mypy.overrides]]
-module = ["easysnmp.*"]
-ignore_missing_imports = true
 ```
 
 Notas:
 
-- Si `fail_under = 80` es demasiado alto para el primer merge, arrancar con el valor actual (≈30–40 %, a medir) y subirlo en cada fase. La regla es que **nunca baje**.
-- `strict = true` en mypy es viable porque el código es chico. Si bloquea demasiado al principio, usar `strict = false` + `disallow_untyped_defs = true` y endurecerlo después.
+- La regla de `fail_under` es que **nunca baje**.
 - `S` (bandit) cubre los chequeos de seguridad estáticos del código; `pip-audit` cubre las dependencias.
 - Con `package = false` no hay `[build-system]` ni `[project.scripts]`: no se construye ningún wheel. Si algún día hiciera falta instalarlo como paquete, recién ahí conviene pasar a `src/monitoreo_ups/`.
 
@@ -643,103 +603,36 @@ Configuración en GitLab:
 - `main` como **rama protegida**: sólo se mergea por MR con aprobación de CODEOWNERS. Esto importa porque el cron de la VM construye y ejecuta lo que esté en `main` (§6.4).
 - Pipeline programado (**CI/CD → Schedules**) semanal sobre `main` que corra `audit`, para enterarse de CVEs nuevas aunque no haya cambios.
 
-### 4.2 `.gitlab-ci.yml` propuesto
+### 4.2 `.gitlab-ci.yml`
 
-```yaml
-stages:
-  - calidad
-  - test
-  - seguridad
-  - build
+> **Estado: implementado** (paso 10), ver [.gitlab-ci.yml](../.gitlab-ci.yml). Jobs: `ruff`, `mypy` (con `allow_failure: true` hasta el paso 11), `pytest` con reportes JUnit y Cobertura en el MR, y `pip-audit`. El CI no instala `libsnmp-dev`, porque el wheel de easysnmp para 3.10 ya incluye `libnetsnmp` (M9).
 
-variables:
-  UV_VERSION: "0.9" # fijar a una versión exacta
-  PYTHON_IMAGE: "python:3.12-slim-bookworm"
-  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
-  UV_LINK_MODE: "copy"
-  UV_FROZEN: "1" # usar exactamente uv.lock
+Pendiente:
 
-workflow:
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_PIPELINE_SOURCE == "schedule"
+- **Job `docker-build`** (paso 13), si el runner permite Docker-in-Docker:
 
-.uv:
-  image: $PYTHON_IMAGE
-  cache:
-    key:
-      files: [uv.lock]
-    paths: [.uv-cache]
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential libsnmp-dev
-    - pip install --quiet "uv==${UV_VERSION}.*"
-    - uv sync --locked
-  after_script:
-    - uv cache prune --ci
+  ```yaml
+  docker-build:
+    stage: build # agregar "build" a stages
+    image: docker:27
+    services: [docker:27-dind]
+    variables:
+      DOCKER_TLS_CERTDIR: "/certs"
+    rules:
+      - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    script:
+      - docker build -t monitoreo-ups:ci .
+      - docker run --rm --network none --entrypoint python monitoreo-ups:ci -c "import main"
+  ```
 
-ruff:
-  extends: .uv
-  stage: calidad
+- **Pipeline programado sólo para auditar:** hoy el schedule semanal corre todos los jobs. Para que corra sólo `pip-audit`, agregar a `ruff`, `mypy` y `pytest`:
+
+  ```yaml
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
-  script:
-    - uv run ruff check --output-format=gitlab --output-file=gl-code-quality.json . || (uv run ruff check . && false)
-    - uv run ruff format --check .
-  artifacts:
-    when: always
-    reports:
-      codequality: gl-code-quality.json
+  ```
 
-mypy:
-  extends: .uv
-  stage: calidad
-  rules:
-    - if: $CI_PIPELINE_SOURCE != "schedule"
-  script:
-    - uv run mypy
-
-pytest:
-  extends: .uv
-  stage: test
-  rules:
-    - if: $CI_PIPELINE_SOURCE != "schedule"
-  script:
-    - uv run pytest
-  coverage: '/TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage.xml
-
-pip-audit:
-  image: $PYTHON_IMAGE
-  stage: seguridad
-  before_script:
-    - pip install --quiet "uv==${UV_VERSION}.*"
-  script:
-    # Se audita el lock exportado (versiones exactas + hashes), sin compilar easysnmp.
-    - uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
-    - uvx pip-audit --strict --disable-pip --require-hashes -r requirements.txt
-  artifacts:
-    when: on_failure
-    paths: [requirements.txt]
-
-docker-build:
-  stage: build
-  image: docker:27
-  services: [docker:27-dind]
-  variables:
-    DOCKER_TLS_CERTDIR: "/certs"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-  script:
-    - docker build -t monitoreo-ups:ci .
-    - docker run --rm --network none --entrypoint python monitoreo-ups:ci -c "import main"
-```
+- **Opcional:** reporte de Code Quality de ruff en el MR (`ruff check --output-format=gitlab --output-file=gl-code-quality.json`, publicado como `artifacts:reports:codequality`).
 
 Notas:
 
@@ -754,7 +647,7 @@ Notas:
 
 ### 5.1 Decisiones
 
-- **Imagen base:** `python:3.12-slim-bookworm`. Build en dos etapas: el builder tiene compilador y `libsnmp-dev`; la imagen final sólo lleva la biblioteca de runtime `libsnmp40`.
+- **Imagen base:** `python:3.12-slim-bookworm`, con `ezsnmp` en lugar de easysnmp (M9). Su wheel incluye `libnetsnmp`, así que la imagen no necesita compilador, `libsnmp-dev` ni `libsnmp40`. Build en dos etapas igual, para no llevar uv a la imagen final.
 - **Sin instalar el proyecto:** la imagen lleva el `.venv/` con las dependencias y una copia de `src/` en `/app/src`. Se ejecuta con `python /app/src/main.py`, igual que hoy en la VM.
 - **Usuario no root:** la imagen crea el usuario `ups` (UID `10001`), pero en producción el contenedor corre con el UID del dueño del clon (`user:` del `compose.yaml`, §5.4), para que los archivos de `data/` tengan el mismo dueño dentro y fuera del contenedor.
 - **Contenedor efímero:** Telegraf hace `docker compose run --rm` en cada intervalo. La imagen no tiene `CMD` de larga duración.
@@ -762,7 +655,7 @@ Notas:
 - **Estado fuera de la imagen:** volumen `/etc/telegraf/monitoreo-ups/data` → `/app/data` (SQLite y logs). Ver [A6](#a6-rutas-de-la-base-y-del-env-no-preparadas-para-docker).
 - **Secretos fuera de la imagen:** `env_file: .env` en el `compose.yaml`. **Nunca** hacer `COPY .env`.
 - **Red:** `--network host`, para llegar a los UPS por SNMP con la misma resolución DNS y rutas que la VM, sin configurar redes de Docker.
-- **stdout limpio:** en stdout sólo puede salir line protocol. Los logs van a stderr y a `/app/data/logs/monitoreo.log`, dentro del volumen (M1). Ejecutar siempre sin TTY (`-T` en `docker compose run`), porque la TTY agrega `\r` y rompe el parseo.
+- **stdout limpio:** en stdout sólo puede salir line protocol. Los logs van sólo a `/app/data/logs/monitoreo.log`, dentro del volumen (M1). Ejecutar siempre sin TTY (`-T` en `docker compose run`), porque la TTY agrega `\r` y rompe el parseo.
 
 ### 5.2 `Dockerfile` propuesto
 
@@ -772,11 +665,7 @@ ARG PYTHON_VERSION=3.12
 
 # ---------- builder ----------
 FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /uvx /bin/
-
-RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential libsnmp-dev \
- && rm -rf /var/lib/apt/lists/*
+COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -794,10 +683,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---------- runtime ----------
 FROM python:${PYTHON_VERSION}-slim-bookworm
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends libsnmp40 \
- && rm -rf /var/lib/apt/lists/* \
- && useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin ups \
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin ups \
  && mkdir -p /app/data && chown ups /app/data
 
 WORKDIR /app
@@ -897,7 +783,7 @@ UID_TELEGRAF=<id -u telegraf>
 GID_TELEGRAF=<id -g telegraf>
 ```
 
-- `LOG_LEVEL` es el nivel del archivo `data/logs/monitoreo.log`; stderr siempre muestra desde `WARNING`.
+- `LOG_LEVEL` es el nivel del archivo `data/logs/monitoreo.log`, el único destino de los logs.
 - `UID_TELEGRAF`/`GID_TELEGRAF` no los usa la aplicación: compose lee automáticamente el `.env` de la carpeta del `compose.yaml` para completar las variables `${...}`. Así el UID de la VM no queda en git.
 - No poner comentarios al final de una línea.
 
@@ -909,7 +795,7 @@ name: monitoreo-ups
 services:
   monitoreo:
     image: monitoreo-ups:prod
-    pull_policy: never          # la imagen es local: la construye y promueve el deploy (§6)
+    pull_policy: never # la imagen es local: la construye y promueve el deploy (§6)
     network_mode: host
     user: "${UID_TELEGRAF:?falta en .env}:${GID_TELEGRAF:?falta en .env}"
     env_file: .env
@@ -929,7 +815,7 @@ Snippet de Telegraf (`deploy/telegraf-monitoreo-ups.conf` → `/etc/telegraf/tel
     "docker compose -f /etc/telegraf/monitoreo-ups/compose.yaml run --rm -T monitoreo",
   ]
   interval = "60s"     # mantener el intervalo actual
-  timeout  = "50s"     # < interval; medir la duración real tras A5 y ajustar
+  timeout  = "30s"     # peor caso medido tras A5: ~6 s
   data_format = "influx"
 ```
 
@@ -1052,7 +938,7 @@ main "$@"
 
 ### 6.3 Instalación en la VM
 
-```bash
+````bash
 Se reutiliza el clon existente en `/etc/telegraf/monitoreo-ups`, ya preparado en §5.4 (dueño `telegraf`, en el grupo `docker`).
 
 ```bash
@@ -1070,7 +956,7 @@ sudo -u telegraf /etc/telegraf/monitoreo-ups/deploy/actualizar.sh
 
 # 4. Rotación del log (/etc/logrotate.d/monitoreo-ups)
 /etc/telegraf/monitoreo-ups/data/logs/deploy.log { weekly rotate 8 compress missingok notifempty su telegraf telegraf }
-```
+````
 
 - El log del deploy queda junto al de la aplicación, en `data/logs/`, así todos los logs están en un solo lugar. `deploy.log` lo rota `logrotate`; `monitoreo.log` lo rota la propia aplicación (M1).
 - Cambiar `LOCK_FILE` a una ruta donde `telegraf` pueda escribir si `/var/lock` no lo permite (en Debian/Ubuntu es `/run/lock`, escribible por todos). No ponerlo dentro del clon: `git clean -fd` lo borraría.
@@ -1095,29 +981,29 @@ Cada paso es **un MR independiente**, en este orden. El orden sigue tres criteri
 2. **Después las herramientas** (paquete, uv, formato, CI). Así los refactors grandes llegan con lint, tipado y tests protegiendo, y sus diffs no se mezclan con cambios de formato.
 3. **Al final los refactors de dominio**, cuando ya existe el deploy automático y cada cambio llega a la VM solo.
 
-| #    | Paso                                                                    | Tamaño | Depende de |
-| ---- | ----------------------------------------------------------------------- | ------ | ---------- |
-| ✅   | A1 — Métricas sin dato y `SIN_RESPUESTA_SNMP`                           | M      | —          |
-| ✅ 1 | Limpieza trivial (B2, B4, B10, comentarios residuales)                  | XS     | —          |
-| ✅ 2 | M1 — Eliminar seqlog, `logging` estándar                                | S      | —          |
-| ✅ 3 | A2 — Aislar drivers y código de salida                                  | S      | 2          |
-| 4    | M2 + M8 — Salida desde el hilo principal y control de futures           | S      | 3          |
-| 5    | A5 — Timeouts SNMP/HTTP                                                 | S      | —          |
-| 6    | A8 — No perder alertas si falla Google Chat                             | S      | —          |
-| 7    | B1 + B3 + B6 + B7 — Imports, `tests/`, SQL a `src/` y Makefile          | S      | 1–6        |
-| 8    | uv + `pyproject.toml` + `uv.lock`                                       | S      | 7          |
-| 9    | `ruff --fix` + `ruff format` (sólo formato)                             | S      | 8          |
-| 10   | A7 — CI nuevo (ruff, pytest + cobertura, pip-audit; mypy no bloqueante) | M      | 9          |
-| 11   | B5 — Type hints hasta que mypy pase; mypy pasa a bloquear               | M      | 10         |
-| 12   | A6 + M7 — Configuración y secretos por variables de entorno             | M      | 8          |
-| 13   | Docker (`Dockerfile`, `.dockerignore`, `compose.yaml`, easysnmp — M9)   | M      | 12         |
-| 14   | Deploy automático (cron, Telegraf con `docker compose run`, corte)      | M      | 13         |
-| 15   | M5 — Modelo de la tabla de errores                                      | M      | 14         |
-| 16   | M4 — Contrato `BaseUPS` homogéneo                                       | L      | 14         |
-| 17   | M6 — Reglas de validación declarativas y alertas estructuradas          | L      | 16         |
-| 18   | M10 — Mensajes de Google Chat con tarjetas                              | M      | 6, 15, 17  |
-| 19   | M3 — Alertas del UPS trifásico del DC                                   | M      | 16, 17     |
-| 20   | B8 — README y documentación final                                       | S      | todo       |
+| #     | Paso                                                                    | Tamaño | Depende de |
+| ----- | ----------------------------------------------------------------------- | ------ | ---------- |
+| ✅    | A1 — Métricas sin dato y `SIN_RESPUESTA_SNMP`                           | M      | —          |
+| ✅ 1  | Limpieza trivial (B2, B4, B10, comentarios residuales)                  | XS     | —          |
+| ✅ 2  | M1 — Eliminar seqlog, `logging` estándar                                | S      | —          |
+| ✅ 3  | A2 — Aislar drivers y código de salida                                  | S      | 2          |
+| ✅ 4  | M2 + M8 — Salida desde el hilo principal y control de futures           | S      | 3          |
+| ✅ 5  | A5 — Timeouts SNMP/HTTP                                                 | S      | —          |
+| ✅ 6  | A8 — No perder alertas si falla Google Chat                             | S      | —          |
+| ◐ 7   | B1 + B3 + B6 + B7 — Imports, `tests/`, SQL a `src/` y Makefile          | S      | 1–6        |
+| ✅ 8  | uv + `pyproject.toml` + `uv.lock`                                       | S      | 7          |
+| ✅ 9  | `ruff --fix` + `ruff format` (sólo formato)                             | S      | 8          |
+| ✅ 10 | A7 — CI nuevo (ruff, pytest + cobertura, pip-audit; mypy no bloqueante) | M      | 9          |
+| 11    | B5 — Type hints, mypy `strict` y reglas completas de ruff               | M      | 10         |
+| 12    | A6 + M7 — Configuración y secretos por variables de entorno             | M      | 8          |
+| 13    | Docker + `ezsnmp` y Python 3.12 (M9)                                    | M      | 12         |
+| 14    | Deploy automático (cron, Telegraf con `docker compose run`, corte)      | M      | 13         |
+| 15    | M5 — Modelo de la tabla de errores                                      | M      | 14         |
+| 16    | M4 — Contrato `BaseUPS` homogéneo                                       | L      | 14         |
+| 17    | M6 — Reglas de validación declarativas y alertas estructuradas          | L      | 16         |
+| 18    | M10 — Mensajes de Google Chat con tarjetas                              | M      | 6, 15, 17  |
+| 19    | M3 — Alertas del UPS trifásico del DC                                   | M      | 16, 17     |
+| 20    | B8 — README y documentación final                                       | S      | todo       |
 
 A3 y A4 quedaron cubiertos en su mayor parte por A1. Lo único pendiente es **probar el fallback de `OIDTNEW` contra un UPS real** cuando se despliegue A1. B3 (tests) no es un paso aparte: cada MR suma los tests de lo que cambia. B9 (nombres de las mediciones) queda fuera del plan hasta que se coordine con los dashboards.
 
@@ -1129,29 +1015,31 @@ Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rá
 - [x] **1. Limpieza trivial:** borrar `scrip/` (B2), `== None` → `is None` (B4), `.gitignore` (B10) y el comentario `# ,'f2r9u1'`. Va primero porque no tiene riesgo y saca ruido de los diffs que siguen.
 - [x] **2. M1:** `logging` estándar; configurar el logger dentro del `__main__`; reescribir las llamadas con kwargs. Va antes que A2 porque simplifica su manejo de errores y elimina un `TypeError` latente.
 - [x] **3. A2:** `try/except` por driver (incluida la creación del cliente SNMP); código de salida 0 si al menos un driver terminó bien.
-- [ ] **4. M2 + M8:** los drivers devuelven sus líneas y `main` las imprime desde el hilo principal. La lectura del resultado de cada future ya quedó hecha en A2. Toca el mismo flujo que A2, por eso va justo después.
-- [ ] **5. A5:** `timeout`/`retries` en SNMP, cortar el host tras el primer timeout, timeout HTTP, quitar `time.sleep(1)` y `max_workers` configurable. Hace falta saber el `interval`/`timeout` actual de Telegraf.
-- [ ] **6. A8:** persistir el cambio de estado sólo si el envío fue exitoso; notificador nulo en lugar de `None`.
+- [x] **4. M2 + M8:** los drivers devuelven sus líneas y `main` las imprime desde el hilo principal. La lectura del resultado de cada future ya quedó hecha en A2. Toca el mismo flujo que A2, por eso va justo después.
+- [x] **5. A5:** `timeout`/`retries` en SNMP, cortar el host tras el primer timeout, timeout HTTP (con `urllib.request` en lugar de httplib2), quitar `time.sleep(1)` y `max_workers` configurable.
+  - [X] Bajar el `timeout` de Telegraf en la VM a `30s` después de desplegar.
+- [x] **6. A8:** persistir el cambio de estado sólo si el envío fue exitoso; `notificador` y `rep_db` obligatorios en `StateUPS` en lugar del notificador nulo.
 
 ### Etapa 2 — Herramientas
 
 - [ ] **7. Ordenar la estructura (sin convertirla en paquete, §3.1):**
-  - Imports de los tests sin el prefijo `src.` (B1) y `test/` → `tests/` (B3).
-  - Mover el SQL a `src/infraestructura/schema.sql` (A6).
-  - Quitar shebangs y `chmod +x`; ejecutar con `python src/main.py` (B7).
-  - Makefile basado en uv (B6).
-  - Va **después** de la etapa 1 para no mover archivos mientras hay arreglos en curso, y **antes** de las herramientas porque mueve archivos.
-- [ ] **8. uv:** `pyproject.toml` (§3.3), `uv.lock`, `.python-version`; borrar `pytest.ini`.
-- [ ] **9. Formato:** `ruff check --fix` + `ruff format` en un MR que **sólo** cambie formato, para que los refactors posteriores tengan diffs limpios.
-- [ ] **10. A7 — CI:** nuevo `.gitlab-ci.yml` (§4.2) con ruff, pytest + cobertura y pip-audit bloqueantes; mypy con `allow_failure: true` hasta el paso 11. Proteger `main`, activar "Pipelines must succeed" y programar el `pip-audit` semanal.
-- [ ] **11. B5:** type hints hasta que mypy pase y quitar el `allow_failure`. Va antes de los refactors grandes porque es cuando más ayuda.
+  - [x] Imports de los tests sin el prefijo `src.` (B1) y sin `import *` en `test_validacion.py`.
+  - [x] Makefile basado en uv (B6).
+  - [ ] `test/` → `tests/` (B3) y actualizar `testpaths`, `src` de ruff y los imports `from test.conftest`.
+  - [ ] Mover el SQL a `src/infraestructura/schema.sql` (A6).
+  - [ ] Quitar los shebangs `#!/usr/bin/python3` de los 10 módulos de `src/` (B7).
+- [x] **8. uv:** `pyproject.toml` (§3.3), `uv.lock`, `.python-version` (3.10, ver M9); borrar `pytest.ini`.
+- [x] **9. Formato:** `ruff check --fix` + `ruff format` en un MR que **sólo** cambie formato, para que los refactors posteriores tengan diffs limpios. Con las reglas mínimas de §3.3; el resto se suma en el paso 11.
+- [x] **10. A7 — CI:** nuevo `.gitlab-ci.yml` (§4.2) con ruff, pytest + cobertura y pip-audit bloqueantes; mypy con `allow_failure: true` hasta el paso 11.
+  - [X] Configuración de GitLab (§4.1): proteger `main`, activar "Pipelines must succeed" y programar el pipeline semanal.
+- [ ] **11. B5:** mypy ya pasa en modo por defecto, así que se puede quitar el `allow_failure` enseguida. Después: type hints hasta que pase con `strict = true`, sumar los tests a mypy, ampliar las reglas de ruff de a grupos (§3.3) y subir `fail_under`. Va antes de los refactors grandes porque es cuando más ayuda.
 
 ### Etapa 3 — Despliegue automático
 
 - [ ] **12. A6 + M7:** base y logs en `data/` (`data/logs/`), `.env` en formato `CLAVE=valor`, comunidad SNMP, webhook (renombrado a `GOOGLE_CHAT_WEBHOOK_URL`), timeouts y nivel de log por variables de entorno.
 - [ ] **13. Docker:**
   - `Dockerfile`, `.dockerignore` y `compose.yaml`.
-  - Validar que easysnmp compila (M9); si no, migrar a `ezsnmp` en este mismo paso.
+  - Migrar a `ezsnmp` y Python 3.12 (M9): `snmp_client.py`, tests, `.python-version`, `requires-python`, `target-version` de ruff, `python_version` de mypy e imagen del CI.
   - Probar la imagen en la VM **en paralelo** al esquema actual, con un `docker run` directo que monte otra carpeta como `/app/data` (por ejemplo `-v /tmp/monitoreo-prueba:/app/data`), sin webhook y escribiendo a un measurement de prueba.
 - [ ] **14. Deploy:**
   - `deploy/actualizar.sh` y su cron (§6).
@@ -1175,7 +1063,7 @@ Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rá
 
 ## 8. Preguntas abiertas
 
-1. ¿Cuál es el `interval` y el `timeout` actual del `[[inputs.exec]]` en Telegraf? Hacen falta para dimensionar los timeouts de SNMP (A5).
+1. ~~¿Cuál es el `interval` y el `timeout` actual del `[[inputs.exec]]` en Telegraf?~~ Respondida: `interval = "60s"`, `timeout = "60s"` (A5).
 2. ¿El runner de GitLab permite Docker-in-Docker (modo privilegiado)? Define si `docker-build` corre en el CI (§4.2).
 3. ¿La VM tiene salida directa a Docker Hub, ghcr.io y PyPI, o sale por un proxy? (§6.4)
 4. ¿La tabla `errores` se quiere como estado actual o como historial de incidentes? (M5)
