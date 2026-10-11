@@ -1,36 +1,19 @@
 # Plan de mejora v2 — Monitoreo UPS
 
-> Fecha de revisión: 2026-10-09 · Rama revisada: `dev` (commit `4637f98`)
+> Fecha de revisión: 2026-10-09
 
 Este documento junta tres cosas:
 
 1. Los **problemas encontrados** al revisar todo el código (bugs, riesgos y deuda técnica), priorizados.
 2. La **modernización del proyecto**: migración a `uv`, `pyproject.toml` completo y CI con `ruff`, `mypy`, `pip-audit`, tests y cobertura.
-3. El **nuevo esquema de despliegue**: imagen Docker que Telegraf ejecuta con `docker run`, y un cron en la VM que trae `main`, construye la imagen y limpia las imágenes viejas (la instancia de GitLab no tiene Container Registry).
-
----
-
-## Índice
-
-1. [Situación actual](#1-situación-actual)
-2. [Hallazgos de la revisión de código](#2-hallazgos-de-la-revisión-de-código)
-   - [Resumen priorizado](#21-resumen-priorizado)
-   - [Prioridad alta](#22-prioridad-alta)
-   - [Prioridad media](#23-prioridad-media)
-   - [Prioridad baja / deuda técnica](#24-prioridad-baja--deuda-técnica)
-3. [Migración a uv y pyproject.toml](#3-migración-a-uv-y-pyprojecttoml)
-4. [CI/CD: calidad y seguridad](#4-cicd-calidad-y-seguridad)
-5. [Contenerización](#5-contenerización)
-6. [Despliegue automático con cron en la VM](#6-despliegue-automático-con-cron-en-la-vm)
-7. [Hoja de ruta por fases](#7-hoja-de-ruta-por-fases)
-8. [Preguntas abiertas](#8-preguntas-abiertas)
+3. El **nuevo esquema de despliegue**: imagen Docker que Telegraf ejecuta con `docker compose run`, y un cron en la VM que trae `main`, construye la imagen y limpia las imágenes viejas (la instancia de GitLab no tiene Container Registry).
 
 ---
 
 ## 1. Situación actual
 
 ```text
-Telegraf (VM) ──exec cada X s──▶ python3 src/main.py (repo clonado en la VM)
+Telegraf (VM) ──exec cada 60 s──▶ python3 src/main.py (repo clonado en /etc/telegraf/monitoreo-ups)
                                    │
                                    ├─ SNMP ─▶ 26 UPS APC + UPS trifásico del DC + sensor de humedad
                                    ├─ SQLite data/errores.db (estado de alertas, dentro del repo)
@@ -43,11 +26,11 @@ Telegraf (VM) ──exec cada X s──▶ python3 src/main.py (repo clonado en 
 
 **Estado del código verificado en esta revisión:**
 
-| Verificación                                  | Resultado                                                                                                                           |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `pytest` (local)                              | 17 tests pasan; sólo cubren `core/validacion.py` y `infraestructura/database.py`. `test_main.py` es un placeholder (`assert 5==5`). |
-| `ruff check` (reglas E, F, W, B, UP, SIM, PL) | 188 hallazgos, 92 autocorregibles (`F403/F405` por `import *`, `E711` por `== None`, imports sin usar, etc.).                       |
-| CI (`.gitlab-ci.yml`)                         | Probablemente nunca corrió los tests (ver [A7](#a7-el-ci-no-ejecuta-realmente-los-tests)).                                          |
+| Verificación                                  | Resultado                                                                                                     |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `pytest` (local)                              | 17 tests pasan; sólo cubren `core/validacion.py` y `infraestructura/database.py`.                             |
+| `ruff check` (reglas E, F, W, B, UP, SIM, PL) | 188 hallazgos, 92 autocorregibles (`F403/F405` por `import *`, `E711` por `== None`, imports sin usar, etc.). |
+| CI (`.gitlab-ci.yml`)                         | Probablemente nunca corrió los tests.                                                                         |
 
 ---
 
@@ -55,26 +38,27 @@ Telegraf (VM) ──exec cada X s──▶ python3 src/main.py (repo clonado en 
 
 ### 2.1 Resumen priorizado
 
-| ID                                                                         | Prioridad | Problema                                                          | Archivo                                                                                                                     |
-| -------------------------------------------------------------------------- | --------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [A1](#a1-si-falla-snmp-se-publican-ceros-y-se-disparan-alertas-falsas)     | Alta      | Si falla SNMP, se publican ceros y se disparan alertas falsas     | [state_ups.py](../src/drivers/state_ups.py#L17-L40), [dc_ups.py](../src/drivers/dc_ups.py#L24)                              |
-| [A2](#a2-un-error-en-el-ups-del-dc-o-en-humedad-aborta-todo-el-monitoreo)  | Alta      | Un error en el UPS del DC o en humedad aborta todo el monitoreo   | [main.py](../src/main.py#L50-L51)                                                                                           |
-| [A3](#a3-valores-no-numéricos-rompen-el-line-protocol)                     | Alta      | Valores no numéricos rompen el line protocol                      | [state_ups.py](../src/drivers/state_ups.py#L33), [hum_ups.py](../src/drivers/hum_ups.py#L11)                                |
-| [A4](#a4-el-fallback-oidt--oidtnew-no-funciona-en-todos-los-casos)         | Alta      | El fallback `OIDT → OIDTNEW` no funciona en todos los casos       | [state_ups.py](../src/drivers/state_ups.py#L37-L40)                                                                         |
-| [A5](#a5-no-hay-timeouts-acotados-snmp-y-google-chat)                      | Alta      | No hay timeouts acotados (SNMP y Google Chat)                     | [snmp_client.py](../src/infraestructura/snmp_client.py#L8), [notificador.py](../src/infraestructura/notificador.py#L24-L26) |
-| [A6](#a6-el-estado-y-los-secretos-viven-dentro-del-repo)                   | Alta      | El estado (SQLite) y los secretos (`.env`) viven dentro del repo  | [configuracion.py](../src/config/configuracion.py#L90-L93)                                                                  |
-| [A7](#a7-el-ci-no-ejecuta-realmente-los-tests)                             | Alta      | El CI no ejecuta realmente los tests                              | [.gitlab-ci.yml](../.gitlab-ci.yml#L14-L18)                                                                                 |
-| [A8](#a8-si-falla-el-envío-a-google-chat-la-alerta-se-pierde-para-siempre) | Alta      | Si falla el envío a Google Chat, la alerta se pierde para siempre | [state_ups.py](../src/drivers/state_ups.py#L50-L64)                                                                         |
-| [M1](#m1-eliminar-seqlog-y-pasar-a-logging-estándar)                       | Media     | Eliminar seqlog y pasar a `logging` estándar a stderr             | [logger.py](../src/infraestructura/logger.py)                                                                               |
-| [M2](#m2-salida-a-stdout-desde-varios-hilos)                               | Media     | Varios hilos escriben a stdout a la vez                           | [state_ups.py](../src/drivers/state_ups.py#L105)                                                                            |
-| [M3](#m3-el-ups-trifásico-del-dc-no-tiene-alertas)                         | Media     | El UPS trifásico del DC no tiene alertas                          | [dc_ups.py](../src/drivers/dc_ups.py#L41-L43)                                                                               |
-| [M4](#m4-el-contrato-baseups-no-se-respeta)                                | Media     | El contrato `BaseUPS` no se respeta                               | [ups_base.py](../src/core/ups_base.py)                                                                                      |
-| [M5](#m5-modelo-de-datos-de-sqlite)                                        | Media     | Modelo de datos de SQLite y manejo de conexiones                  | [database.py](../src/infraestructura/database.py)                                                                           |
-| [M6](#m6-dominio-acoplado-a-la-presentación-y-a-strings-mágicos)           | Media     | Dominio acoplado a la presentación y a strings mágicos            | [validacion.py](../src/core/validacion.py), [state_ups.py](../src/drivers/state_ups.py#L70-L94)                             |
-| [M7](#m7-configuración-y-secretos-hardcodeados)                            | Media     | Configuración y secretos en el código                             | [configuracion.py](../src/config/configuracion.py)                                                                          |
-| [M8](#m8-threadpoolexecutor-sin-control-de-resultados)                     | Media     | `ThreadPoolExecutor` sin control de resultados                    | [main.py](../src/main.py#L53-L55)                                                                                           |
-| [M9](#m9-easysnmp-sin-mantenimiento)                                       | Media     | `easysnmp` sin mantenimiento                                      | —                                                                                                                           |
-| [B1–B10](#24-prioridad-baja--deuda-técnica)                                | Baja      | Estilo, layout del paquete, tests, documentación desactualizada   | varios                                                                                                                      |
+| ID     | Prioridad | Problema                                                          | Archivo                            |
+| ------ | --------- | ----------------------------------------------------------------- | ---------------------------------- |
+| A1     | Alta      | Si falla SNMP, se publican ceros y se disparan alertas falsas     | `state_ups.py`, `dc_ups.py`        |
+| A2     | Alta      | Un error en el UPS del DC o en humedad aborta todo el monitoreo   | `main.py`                          |
+| A3     | Alta      | Valores no numéricos rompen el line protocol                      | `state_ups.py`, `hum_ups.py`       |
+| A4     | Alta      | El fallback `OIDT→OIDTNEW` no funciona en todos los casos         | `state_ups.py`                     |
+| A5     | Alta      | No hay timeouts acotados (SNMP y Google Chat)                     | `snmp_client.py`, `notificador.py` |
+| A6     | Alta      | Rutas de la base y del `.env` no preparadas para Docker           | `configuracion.py`                 |
+| A7     | Alta      | El CI no ejecuta realmente los tests                              | `.gitlab-ci.yml`                   |
+| A8     | Alta      | Si falla el envío a Google Chat, la alerta se pierde para siempre | `state_ups.py`                     |
+| M1     | Media     | Eliminar seqlog y pasar a `logging` estándar a stderr             | `logger.py`                        |
+| M2     | Media     | Varios hilos escriben a stdout a la vez                           | `state_ups.py`                     |
+| M3     | Media     | El UPS trifásico del DC no tiene alertas                          | `dc_ups.py`                        |
+| M4     | Media     | El contrato `BaseUPS` no se respeta                               | `ups_base.py`                      |
+| M5     | Media     | Modelo de datos de SQLite y manejo de conexiones                  | `database.py`                      |
+| M6     | Media     | Dominio acoplado a la presentación y a strings mágicos            | `validacion.py`, `state_ups.py`    |
+| M7     | Media     | Configuración y secretos en el código                             | `configuracion.py`                 |
+| M8     | Media     | `ThreadPoolExecutor` sin control de resultados                    | `main.py`                          |
+| M9     | Media     | `easysnmp` sin mantenimiento                                      | —                                  |
+| M10    | Media     | Mensajes de Google Chat poco legibles                             | `state_ups.py`, `notificador.py`   |
+| B1–B10 | Baja      | Estilo, layout del paquete, tests, documentación desactualizada   | varios                             |
 
 ### 2.2 Prioridad alta
 
@@ -90,10 +74,15 @@ Todos los drivers inicializan las métricas en `0` y las dejan así si la consul
 
 **Propuesta:**
 
-- Representar "sin dato" con `None`, nunca con `0`.
-- No imprimir los campos sin dato. Si no hay ningún dato, no imprimir la línea de ese UPS o imprimir un campo explícito `snmp_ok=0i`.
-- No validar umbrales sobre métricas sin dato.
+- No imprimir los campos sin dato. Si no hay ningún dato, no imprimir la línea de ese UPS.
 - Agregar un error de dominio `SIN_RESPUESTA_SNMP` que se notifique una sola vez y se resuelva cuando el equipo vuelva a responder, con la misma lógica de la base de datos.
+
+> **Estado: implementado.**
+>
+> - Las métricas sin dato no se imprimen y no se validan, así que no activan ni resuelven errores. Si un equipo no devuelve ningún dato, no se imprime su línea.
+> - `SIN_RESPUESTA_SNMP` se dispara sólo cuando **ningún** OID devolvió un valor numérico, y por ahora sólo en los UPS de state. El DC y el sensor de humedad sólo omiten campos; sus alertas llegan con M3.
+> - `ClienteSNMP.obtener_valor_numerico` convierte los valores no numéricos (`NOSUCH*`, vacío, `nan`) en `None`. Eso cubre la parte de A3 que afectaba a los drivers y hace que funcione el fallback de A4.
+> - Queda pendiente: exigir varias fallas seguidas antes de avisar, si aparecen equipos con fallas intermitentes.
 
 #### A2. Un error en el UPS del DC o en humedad aborta todo el monitoreo
 
@@ -105,6 +94,14 @@ Todos los drivers inicializan las métricas en `0` y las dejan así si la consul
 - El proceso termina con código ≠ 0. Telegraf `inputs.exec` trata eso como error y **descarta toda la salida de esa ejecución**, incluida la línea de humedad que ya se había impreso.
 
 **Propuesta:** aislar cada driver en su propio `try/except`, como ya se hace en `StateUPS.ejecutar`. Que `main` siempre termine con código 0 si se pudo emitir al menos una métrica, y registrar en el log (stderr) cada driver que falle.
+
+> **Estado: implementado.**
+>
+> - `main` arma una tarea por equipo, y cada tarea crea su propio cliente SNMP. Esto quedó confirmado: con un host que no resuelve DNS, `Session()` lanza `EasySNMPConnectionError`, y antes eso tiraba abajo todo.
+> - Cada tarea corre dentro de `_ejecutar_protegido`, que registra la excepción y sigue con las demás.
+> - Código de salida: 0 si al menos una tarea terminó bien, 1 si fallaron todas o si falla la inicialización compartida (notificador, base de datos). Con M2 la regla pasó a ser "0 si se obtuvo al menos una métrica".
+> - El `try/except` de `StateUPS.ejecutar` pasó a `main`, así todos los drivers se protegen igual.
+> - También se lee el resultado de cada future, que era parte de M8.
 
 #### A3. Valores no numéricos rompen el line protocol
 
@@ -154,16 +151,43 @@ Telegraf corta el comando al llegar a su `timeout` (5 s por defecto en `inputs.e
 - Medir la duración total de la ejecución y ajustar `timeout` e `interval` de Telegraf con margen (ver [§5.4](#54-ejecución-desde-telegraf)).
 - Subir `max_workers` (por ejemplo a 13) y hacerlo configurable.
 
-#### A6. El estado y los secretos viven dentro del repo
+> **Estado: implementado** (paso 5).
+>
+> - **SNMP:** `timeout=1`, `retries=1` (constantes `SNMP_TIMEOUT`/`SNMP_RETRIES` en `configuracion.py`; pasan a variables de entorno en el paso 12). Un OID sin respuesta cuesta 2 s en lugar de 4.
+> - **Corte por host:** después del primer timeout, `ClienteSNMP` no consulta más OIDs de ese host en la ejecución. Sólo corta por timeout: un `NOSUCH*` o un error genérico no cortan, porque el fallback `OIDT → OIDTNEW` depende de eso. Un UPS caído pasa de 28 s y 7 warnings a 2 s y 1 warning.
+> - **Paralelismo:** `MAX_WORKERS = 13`, y humedad y DC pasaron al mismo pool que los UPS, así sus timeouts no se suman al resto.
+> - **Google Chat:** se reemplazó httplib2 por `urllib.request` de la librería estándar, con `timeout=10` (`HTTP_TIMEOUT`). Se eliminaron `httplib2`, `pyparsing` y `types-httplib2`. Sólo se acepta una URL `https://` (`urlopen` también abre `file://`). Se quitó el `time.sleep(1)`: con varios hilos no espaciaba los envíos. Si Google Chat rechaza por límite de envío (429), el aviso se pierde hasta que se haga A8.
+> - **Medido:** sin respuesta de ningún UPS de state, la ejecución completa tardó 6,1 s (incluye el arranque de `uv run`); antes superaba los 120 s.
+> - **Telegraf** hoy tiene `interval = "60s"` y `timeout = "60s"`. Con el código anterior se perdía la ejecución si se caía el DC (52 s secuenciales) o la red (~140 s). Ahora alcanza con `timeout = "30s"`, que deja margen y evita que una ejecución colgada se acerque al intervalo.
 
-**Dónde:** [configuracion.py:90-93](../src/config/configuracion.py#L90-L93)
+#### A6. Rutas de la base y del `.env` no preparadas para Docker
 
-`ARCHIVO_DB` (`data/errores.db`) y `ARCHIVO_ENV` (`.env`) se calculan relativos a la raíz del repo clonado. Esto:
+**Dónde:** [configuracion.py:90-93](../src/config/configuracion.py#L90-L93), [notificador.py:11](../src/infraestructura/notificador.py#L11)
 
-- Probablemente es parte del origen de los **conflictos al actualizar la VM**: hay archivos generados y editados a mano dentro del árbol de git.
-- **Con Docker es crítico:** si la base no se monta como volumen, cada `docker run` arranca con una base vacía. Cada error activo se tomaría como nuevo **y se notificaría en cada ejecución**, llenando el chat.
+**Decisión:** la base (`data/errores.db`), los logs y el `.env` **se quedan dentro del clon** (`/etc/telegraf/monitoreo-ups`). Así el volumen de Docker es directamente la carpeta `data/` del repo, y no hay que migrar la base. Esto no genera conflictos con git:
 
-**Propuesta:** leer las rutas de variables de entorno (`MONITOREO_DATA_DIR`, por defecto `/data` en el contenedor). Mover el estado a `/var/lib/monitoreo-ups/` en la VM y los secretos a `/etc/monitoreo-ups/monitoreo.env`, ambos fuera del clon (ver [§5](#5-contenerización)). Empaquetar el script SQL dentro del paquete y leerlo con `importlib.resources`.
+- `.env`, `*.db` y `logs/` están en el [.gitignore](../.gitignore), así que `git reset --hard` no los toca.
+- `git clean -fd` (§6.2) **no borra archivos ignorados**. Sólo los borraría con `-x`, así que **nunca hay que agregar `-x`**.
+- El `.dockerignore` (§5.3) excluye `.env` y `data/`, así que ni la base ni los secretos entran en la imagen.
+
+Lo que sí hay que resolver:
+
+- **Con Docker es crítico montar `data/` como volumen** (lo hace el `compose.yaml`, §5.4). Si no, cada ejecución arranca con una base vacía. Cada error activo se tomaría como nuevo **y se notificaría en cada ejecución**, llenando el chat.
+- **El `.env` no está en la imagen.** En el contenedor los secretos llegan como variables de entorno con `env_file` del `compose.yaml`. `load_dotenv` sigue sirviendo para correr local, y si el archivo no existe no hace nada. Usar el formato simple `CLAVE=valor`, sin espacios alrededor del `=` ni comentarios al final de la línea, que lo entienden igual `load_dotenv`, compose y `docker run --env-file`. El formato actual de [.env.example](../.env.example) (`PASSWORDCHAT= ""`) hay que corregirlo.
+- **El SQL de creación vive en `data/`**, la misma carpeta que se monta como volumen. Dentro del contenedor se vería la copia del clon y no la de la imagen. Conviene moverlo junto al código (`src/infraestructura/schema.sql`) y leerlo relativo a `__file__`. Así `data/` sólo tiene archivos generados en ejecución.
+
+**Propuesta:**
+
+```python
+RUTA_RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+DATA_DIR = os.getenv("MONITOREO_DATA_DIR", os.path.join(RUTA_RAIZ, "data"))
+ARCHIVO_DB = os.path.join(DATA_DIR, "errores.db")
+LOGS_DIR = os.path.join(DATA_DIR, "logs")  # data/logs/ queda ignorado por el patrón "logs/"
+```
+
+- En la VM sin Docker y en desarrollo no cambia nada: la base sigue en `data/errores.db`.
+- En el contenedor el código está en `/app/src`, así que `RUTA_RAIZ` es `/app` y la base queda en `/app/data`, que es donde se monta `data/` del clon (§5.4). `MONITOREO_DATA_DIR` sólo hace falta para usar otra base, por ejemplo en la prueba en paralelo del paso 13.
+- **Permisos:** el contenedor corre con el UID del dueño del clon (`user:` en el `compose.yaml`, §5.4). Así los archivos de `data/` tienen el mismo dueño dentro y fuera del contenedor, y no hace falta ningún `chown`.
 
 #### A7. El CI no ejecuta realmente los tests
 
@@ -177,6 +201,8 @@ Telegraf corta el comando al llegar a su `timeout` (5 s por defecto en `inputs.e
 
 **Propuesta:** reemplazarlo por completo con el pipeline de la [§4](#4-cicd-calidad-y-seguridad).
 
+> **Estado: implementado** (pasos 8–10). El CI corre con uv y Python 3.10: `ruff check` + `ruff format --check`, `mypy` (todavía `allow_failure`), `pytest` con cobertura (`fail_under = 60`, hoy 95 %) y `pip-audit` sobre el lock exportado. Corre en los MR, en `main` y en pipelines programados. Queda pendiente la configuración de GitLab (§4.1) y endurecer reglas (paso 11).
+
 #### A8. Si falla el envío a Google Chat, la alerta se pierde para siempre
 
 **Dónde:** [state_ups.py:50-64](../src/drivers/state_ups.py#L50-L64), [state_ups.py:96-101](../src/drivers/state_ups.py#L96-L101), [notificador.py:34-37](../src/infraestructura/notificador.py#L34-L37)
@@ -186,6 +212,15 @@ Telegraf corta el comando al llegar a su `timeout` (5 s por defecto en `inputs.e
 Además, si `notificador` es `None` (el valor por defecto del constructor), [state_ups.py:101](../src/drivers/state_ups.py#L101) lanza `AttributeError`.
 
 **Propuesta:** que `enviar_mensajes` devuelva `bool` y persistir el cambio de estado **sólo si el envío fue exitoso**, o agregar una columna `notificado` y reintentar los pendientes en cada ejecución. Usar un notificador "nulo" (Null Object) en lugar de `None`.
+
+> **Estado: implementado** (paso 6), con la opción "guardar sólo si se envió".
+>
+> - `enviar_mensajes` devuelve `True` si Google Chat aceptó el mensaje y `False` en cualquier otro caso: error HTTP (incluido el 429 por límite de envío), excepción, URL sin configurar o que no es `https://`.
+> - `StateUPS` valida en dos fases: `_detectar_transicion` compara sensor y base **sin escribir**; después se envía un solo mensaje con todas las transiciones del UPS y, **sólo si llegó**, `_confirmar_transiciones` las guarda. Si falla, no se guarda ninguna y se registra un warning; en la próxima ejecución se detectan otra vez y se reenvían.
+> - **Garantía "al menos una vez":** puede haber un duplicado si Google Chat recibió el mensaje pero la respuesta se perdió. Se prefiere a perder la alerta.
+> - **Sin URL configurada no se guarda nada:** las alertas quedan pendientes (con un error en el log en cada ejecución) y salen cuando se configura el `.env`.
+> - **Limitaciones aceptadas:** un problema que aparece y se resuelve mientras Google Chat falla no se avisa (para la base nunca cambió); y la `fecha` de la base es la del aviso, no la de la detección, así que la duración que muestre M10 puede quedar un poco corta. Si hace falta no perder ningún evento, el patrón *outbox* (tabla de pendientes) se puede sumar en M5.
+> - En lugar del Null Object, `notificador` y `rep_db` pasaron a ser **obligatorios** en `StateUPS`: si faltan, falla al crear el driver y no en medio de una alerta.
 
 ### 2.3 Prioridad media
 
@@ -224,6 +259,15 @@ def configurar_logger() -> None:
 
 Nivel por defecto `WARNING`: en una ejecución normal no se escribe nada, y lo que aparezca en stderr es algo para mirar. Pasos del cambio: `uv remove seqlog`, reescribir las llamadas con kwargs y borrar `set_global_log_properties`/`log_to_seq`.
 
+> **Estado: implementado**, con un cambio respecto a la propuesta: además de stderr, los logs van a un **archivo rotativo** (`logs/monitoreo.log`, 5 MB × 5). El motivo es que Telegraf sólo muestra el stderr cuando la ejecución falla, y los warnings de una ejecución exitosa se perderían.
+>
+> - stderr muestra desde `WARNING`; el archivo, desde `LOG_LEVEL` (por defecto `INFO`).
+> - **Cambio posterior:** los logs van **sólo al archivo**, no se escribe nada por consola. stderr se usa únicamente como respaldo si no se puede abrir el archivo. Con un UPS caído, cada OID generaba un warning en la consola. Contra: cuando la ejecución falla, Telegraf ya no muestra el motivo en su log; hay que mirar `monitoreo.log`.
+> - La carpeta se puede cambiar con `MONITOREO_LOG_DIR`.
+> - Si no se puede crear el archivo, se sigue sólo con stderr.
+>
+> Detalle en [docs/logger/Mejoras.md](logger/Mejoras.md). El `warnings.filterwarnings` se mantuvo, pero ahora se aplica al ejecutar y no al importar.
+
 #### M2. Salida a stdout desde varios hilos
 
 **Dónde:** [state_ups.py:105](../src/drivers/state_ups.py#L105)
@@ -231,6 +275,13 @@ Nivel por defecto `WARNING`: en una ejecución normal no se escribe nada, y lo q
 Los `StateUPS` corren en 6 hilos y cada uno hace `print()`. En CPython, `print` hace **dos escrituras** (el texto y después el `\n`), así que dos hilos pueden intercalarse y producir `lineaAlineaB\n\n`, que es inválido para Telegraf. Es poco frecuente, pero cuando pasa se pierde la ejecución entera.
 
 **Propuesta:** que `ejecutar()` **devuelva** las líneas (o un `dict` de métricas) y que `main` las imprima desde el hilo principal con un único `sys.stdout.write("\n".join(lineas) + "\n")`. Esto además facilita testear los drivers.
+
+> **Estado: implementado** (junto con M8, paso 4).
+>
+> - Los drivers ya no imprimen: `imprimir_telegraf()` pasó a ser `lineas_telegraf() -> list[str]` y `ejecutar()` devuelve las líneas. Se eligió devolver líneas y no un `dict`: el formateo centralizado queda para A3/M4.
+> - Las líneas vuelven al hilo principal por los futures. `main.escribir_lineas` las escribe todas juntas al final, con una sola escritura, en el orden de las tareas (humedad, DC y los UPS en el orden de la configuración), no en el que terminan.
+> - Si falla la validación o la notificación de un UPS (base de datos, Google Chat), el error se registra y **sus métricas se publican igual**.
+> - **Código de salida:** 0 si se obtuvo al menos una métrica; 1 si no hay ninguna. Telegraf descarta toda la salida si el código no es 0, así que una tarea que falla ya no puede llevarse puestas las métricas de las demás. Cambio de comportamiento: si no responde ningún equipo, ahora sale con 1 y Telegraf lo muestra como error en su log (antes salía con 0 sin métricas).
 
 #### M3. El UPS trifásico del DC no tiene alertas
 
@@ -302,7 +353,7 @@ class BaseUPS(ABC):
 - La variable `PASSWORDCHAT` contiene una **URL de webhook**. Conviene renombrarla a `GOOGLE_CHAT_WEBHOOK_URL` y actualizar [.env.example](../.env.example).
 - Hay un comentario residual `# ,'f2r9u1'` ([configuracion.py:9](../src/config/configuracion.py#L9)) cuando `f2r9u1` ya está en la lista.
 - Los umbrales están documentados con valores distintos en distintos lugares: el README dice 27 °C y el código 28; el commit `480f293` dice 50 % y el código actual tiene 60. Conviene que haya **una sola fuente de verdad** (el código o un archivo de configuración) y que el README remita a ella.
-- Con Docker, cambiar un host o un umbral implica commit, build y deploy, algo aceptable gracias al cron (§6). Los **secretos** y los valores que dependen del entorno (rutas, timeouts, nivel de log) deben venir de `--env-file`.
+- Con Docker, cambiar un host o un umbral implica commit, build y deploy, algo aceptable gracias al cron (§6). Los **secretos** y los valores que dependen del entorno (timeouts, nivel de log) deben venir del `.env` del clon, que compose pasa al contenedor con `env_file`.
 
 #### M8. `ThreadPoolExecutor` sin control de resultados
 
@@ -310,26 +361,129 @@ class BaseUPS(ABC):
 
 Los `Future` de `executor.submit` se descartan: cualquier excepción que escape del `try` de `StateUPS.ejecutar` se pierde sin registrarse. Hay que guardar los futures, iterar con `as_completed` y registrar los fallos. Esto encaja con M2: cada future devuelve sus líneas.
 
+> **Estado: implementado.** En A2 se empezó a leer el resultado de cada future; con M2 cada future devuelve las líneas de su equipo, o `None` si la tarea lanzó una excepción (que queda registrada con traceback). Se leen en el orden de las tareas en lugar de usar `as_completed`, para que la salida sea reproducible.
+
 #### M9. `easysnmp` sin mantenimiento
 
 `easysnmp` (0.2.6) no tiene releases desde hace años, es una extensión en C que necesita `libsnmp-dev` para compilarse y en la VM se instala desde `apt` (`python3-easysnmp`). En una imagen Docker con un Python más nuevo, la compilación puede fallar.
 
-**Propuesta:** en el primer build de la imagen, validar que compila contra `python:3.12-slim-bookworm`. A mediano plazo, evaluar `ezsnmp` (un fork mantenido con API casi idéntica) o `pysnmp` (Python puro, sin dependencias de C). Como `ClienteSNMP` ya aísla la librería, el cambio queda contenido en un solo archivo.
+**Verificado al migrar a uv (paso 8):**
+
+- `easysnmp` 0.2.6 publica wheels **sólo hasta Python 3.10**. En 3.12 hay que compilarlo desde el código fuente, y su `setup.py` usa `distutils` (eliminado en 3.12) y `setuptools.command.test` (eliminado en setuptools 72), así que **no instala**. En la VM funciona porque el paquete de `apt` viene parcheado.
+- El wheel para 3.10 (`manylinux`) **incluye `libnetsnmp`**, así que no hace falta `libsnmp-dev` ni compilador. Por eso el proyecto quedó, por ahora, en **Python 3.10** (`.python-version`), sin cambios de código.
+- `ezsnmp` 2.4 publica wheels para 3.10–3.14 que también incluyen `libnetsnmp`. Su API cambia un poco respecto de easysnmp:
+  - `Session(hostname=..., version=..., community=..., timeout=..., retries=...)` es casi igual.
+  - `session.get(oid)` devuelve una **tupla** de `Result`: hay que usar `session.get(oid)[0].value`.
+  - Las excepciones están en `ezsnmp.exceptions`: `TimeoutError`, `ConnectionError`, `NoSuchObjectError`, `NoSuchInstanceError`, `NoSuchNameError`.
+
+**Propuesta:** migrar a `ezsnmp` y Python 3.12 en el paso 13 (Docker), cuando la VM deje de usar el Python del sistema. Es urgente porque **Python 3.10 llega a fin de soporte en octubre de 2026**. El cambio queda contenido en [snmp_client.py](../src/infraestructura/snmp_client.py) y en los tests que importan excepciones de easysnmp ([test_snmp_client.py](../test/test_snmp_client.py), [test_main.py](../test/test_main.py)). Probar contra UPS reales con SNMPv1 antes de desplegar.
+
+#### M10. Mensajes de Google Chat más claros
+
+**Dónde:** [state_ups.py:96-101](../src/drivers/state_ups.py#L96-L101), [validacion.py](../src/core/validacion.py), [notificador.py](../src/infraestructura/notificador.py)
+
+Hoy el mensaje es texto plano armado en dos lugares: el dominio arma cada línea y el driver arma el encabezado y la fecha.
+
+```text
+🔔 *Reporte de Estado: f1r11u1*
+
+❌ [ADVERTENCIA] *LOAD_MAXIMO*: Valor actual *63 %*
+✅ [RESUELTO] CARGA_MINIMA volvió a la normalidad.
+
+📅 *Fecha informe:* 09/10/2026 14:32:05
+```
+
+Problemas:
+
+- Se muestra el nombre técnico del `Enum` (`LOAD_MAXIMO`) en lugar de un texto legible.
+- No se informa el umbral: "63 %" no dice si el límite es 60 o 50.
+- Los "resuelto" no informan el valor actual ni cuánto duró el problema.
+- No hay un enlace para ir directo a Grafana.
+- Cada alerta y su resolución llegan como mensajes sueltos y difíciles de seguir en un espacio con 28 equipos.
+
+**Propuesta:**
+
+1. **Tarjetas (`cardsV2`)** en lugar de texto plano. Los webhooks de Google Chat aceptan tarjetas con encabezado, secciones, íconos y botones. Se mantiene el campo `text` como resumen corto, que es lo que se ve en la notificación del celular. Hay que **probarlo antes con un webhook de prueba**.
+2. **Contenido de cada alerta:**
+   - Nombre legible: "Carga de salida alta".
+   - Valor y umbral: `63 % (máx. 60 %)`.
+   - Severidad, con color o ícono según sea advertencia o resolución.
+   - Equipo y fecha.
+3. **Resoluciones informativas:** "Carga de salida normalizada: 48 % · duró 2 h 15 min". La duración sale de la `fecha` de activación guardada en la base, leída antes de resolver (depende de M5).
+4. **Botón "Ver en Grafana"** con la URL del dashboard filtrada por `host` (variable de entorno `GRAFANA_URL`).
+5. **Hilos por equipo:** usar el parámetro `threadKey` del webhook (con `messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD`) para que todas las alertas y resoluciones de un UPS queden en el mismo hilo.
+6. **Separar responsabilidades:**
+   - El dominio devuelve objetos `Alerta` (tipo, valor, umbral, unidad, estado), sin formato.
+   - Un `FormateadorGoogleChat` en infraestructura arma la tarjeta.
+   - Cambiar el diseño del mensaje no toca ni las validaciones ni los drivers.
+
+Ejemplo de tarjeta (simplificado):
+
+```json
+{
+  "text": "⚠️ f1r11u1: carga de salida alta (63 %)",
+  "cardsV2": [
+    {
+      "cardId": "alerta-f1r11u1",
+      "card": {
+        "header": {
+          "title": "UPS f1r11u1",
+          "subtitle": "1 alerta nueva · 1 resuelta"
+        },
+        "sections": [
+          {
+            "widgets": [
+              {
+                "decoratedText": {
+                  "topLabel": "⚠️ Carga de salida alta",
+                  "text": "<b>63 %</b> (máx. 60 %)"
+                }
+              },
+              {
+                "decoratedText": {
+                  "topLabel": "✅ Carga de batería normalizada",
+                  "text": "98 % · duró 2 h 15 min"
+                }
+              },
+              {
+                "buttonList": {
+                  "buttons": [
+                    {
+                      "text": "Ver en Grafana",
+                      "onClick": {
+                        "openLink": {
+                          "url": "https://grafana/...&var-host=f1r11u1"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+Depende de M6 (que el dominio devuelva alertas estructuradas) y de A8 (que el envío informe si salió bien).
 
 ### 2.4 Prioridad baja / deuda técnica
 
-| ID  | Problema                                                                                                                                                                                                                                                                                  | Propuesta                                                                                                                                                |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| B1  | Los paquetes de primer nivel se llaman `config`, `core`, `drivers` e `infraestructura`: nombres genéricos que pueden chocar con otras librerías. Los tests importan `src.core...` mientras el código importa `core...`, así que el mismo módulo se carga dos veces con nombres distintos. | Reestructurar como `src/monitoreo_ups/{config,core,drivers,infraestructura}` y usar imports absolutos `monitoreo_ups.…` (ver §3).                        |
-| B2  | La carpeta [scrip/](../scrip/) tiene pruebas sueltas (`loggerv1.py` está vacío).                                                                                                                                                                                                          | Eliminarla.                                                                                                                                              |
-| B3  | [test_main.py](../test/test_main.py) es un placeholder. No hay tests de drivers, notificador, cliente SNMP ni del flujo de `main`.                                                                                                                                                        | Tests de drivers con un `ClienteSNMP` falso (fake), del notificador con `responses`/mocks y del formateo de line protocol. Renombrar `test/` a `tests/`. |
-| B4  | Las comparaciones `== None` / `!= None` aparecen en [hum_ups.py:15](../src/drivers/hum_ups.py#L15) y en los tests.                                                                                                                                                                        | `is None` (`ruff --fix`).                                                                                                                                |
-| B5  | Faltan type hints en todo el proyecto.                                                                                                                                                                                                                                                    | Agregarlos de forma progresiva, con `mypy` en el CI (§4).                                                                                                |
-| B6  | El [Makefile](../Makefile) instala con `sudo apt`, `run_hum` y `run_state` son idénticos.                                                                                                                                                                                                 | Reemplazarlo por objetivos basados en `uv`: `make lint`, `make test`, `make build`, `make run`.                                                          |
-| B7  | Los shebangs `#!/usr/bin/python3` en todos los módulos y el `chmod +x` del Makefile ya no hacen falta.                                                                                                                                                                                    | Usar el entry point `monitoreo-ups` del `pyproject.toml`.                                                                                                |
-| B8  | El [README.md](../README.md) describe una estructura vieja (`humedad_ups/`, `state_ups/`, `Sesiones.py`, `borrar_si_vieja()`) que ya no existe. Dice "decisegundos" para `life`, pero la división por 6000 corresponde a TimeTicks (centésimas de segundo).                               | Reescribirlo: qué hace, cómo correrlo con `uv`, cómo se despliega y un enlace a [docs/arqui/arquitectura_y_uso.md](arqui/arquitectura_y_uso.md).         |
-| B9  | Los nombres de las mediciones no son consistentes: humedad y estado comparten `ups_temp2` y el DC usa `dc-ups`.                                                                                                                                                                           | **No cambiarlos todavía**, porque romperían los dashboards de Grafana. Documentarlos y, si se cambian, hacerlo de forma coordinada.                      |
-| B10 | `.gitignore` no contempla `.venv/`, `.mypy_cache/`, `.ruff_cache/`, `coverage.xml` ni `htmlcov/`.                                                                                                                                                                                         | Agregarlos.                                                                                                                                              |
+| ID  | Problema                                                                                                                                                                                                                                                    | Propuesta                                                                                                                                                                                                                                                                           |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B1  | [test_db.py](../test/test_db.py) importa `src.infraestructura...` mientras el código importa `infraestructura...`, así que el mismo módulo se carga dos veces con nombres distintos.                                                                        | Importar siempre sin el prefijo `src.` (`pythonpath = ["src"]` ya lo permite). **No** se reestructura a `src/monitoreo_ups/`: el proyecto no se instala como paquete (§3), así que los nombres genéricos (`config`, `core`) no chocan con nada.                                     |
+| B2  | La carpeta [scrip/](../scrip/) tiene pruebas sueltas (`loggerv1.py` está vacío).                                                                                                                                                                            | Eliminarla.                                                                                                                                                                                                                                                                         |
+| B3  | [test_main.py](../test/test_main.py) es un placeholder. No hay tests de drivers, notificador, cliente SNMP ni del flujo de `main`.                                                                                                                          | Tests de drivers con un `ClienteSNMP` falso (fake), del notificador con `responses`/mocks y del formateo de line protocol. Renombrar `test/` a `tests/`: `test` es también un paquete de la librería estándar y los imports `from test.conftest ...` pueden resolver al equivocado. |
+| B4  | Las comparaciones `== None` / `!= None` aparecen en [hum_ups.py:15](../src/drivers/hum_ups.py#L15) y en los tests.                                                                                                                                          | `is None` (`ruff --fix`).                                                                                                                                                                                                                                                           |
+| B5  | Faltan type hints en todo el proyecto.                                                                                                                                                                                                                      | Agregarlos de forma progresiva, con `mypy` en el CI (§4).                                                                                                                                                                                                                           |
+| B6  | El [Makefile](../Makefile) instala con `sudo apt`, `run_hum` y `run_state` son idénticos.                                                                                                                                                                   | Reemplazarlo por objetivos basados en `uv`: `make lint`, `make test`, `make build`, `make run`.                                                                                                                                                                                     |
+| B7  | Los shebangs `#!/usr/bin/python3` en todos los módulos y el `chmod +x` del Makefile ya no hacen falta.                                                                                                                                                      | Ejecutar siempre con `python src/main.py` (`uv run python src/main.py` en desarrollo).                                                                                                                                                                                              |
+| B8  | El [README.md](../README.md) describe una estructura vieja (`humedad_ups/`, `state_ups/`, `Sesiones.py`, `borrar_si_vieja()`) que ya no existe. Dice "decisegundos" para `life`, pero la división por 6000 corresponde a TimeTicks (centésimas de segundo). | Reescribirlo: qué hace, cómo correrlo con `uv`, cómo se despliega y un enlace a [docs/arqui/arquitectura_y_uso.md](arqui/arquitectura_y_uso.md).                                                                                                                                    |
+| B9  | Los nombres de las mediciones no son consistentes: humedad y estado comparten `ups_temp2` y el DC usa `dc-ups`.                                                                                                                                             | **No cambiarlos todavía**, porque romperían los dashboards de Grafana. Documentarlos y, si se cambian, hacerlo de forma coordinada.                                                                                                                                                 |
+| B10 | `.gitignore` no contempla `.venv/`, `.mypy_cache/`, `.ruff_cache/`, `coverage.xml` ni `htmlcov/`.                                                                                                                                                           | Agregarlos.                                                                                                                                                                                                                                                                         |
 
 ---
 
@@ -337,135 +491,70 @@ Los `Future` de `executor.submit` se descartan: cualquier excepción que escape 
 
 ### 3.1 Estructura objetivo
 
+Se mantiene la estructura actual de `src/`. El proyecto es una aplicación que se ejecuta como script, no una librería que se instala, así que no hace falta convertirlo en un paquete (`src/monitoreo_ups/`). uv lo maneja como proyecto "no empaquetado" (`[tool.uv] package = false`): sólo instala las dependencias en `.venv/`, y el código se ejecuta desde `src/`.
+
 ```text
-monitoreo-ups/
+monitoreo-ups/                      # en la VM: /etc/telegraf/monitoreo-ups
 ├── pyproject.toml
 ├── uv.lock                         # versionado
-├── .python-version                 # 3.12
+├── .python-version                 # 3.10 por ahora; 3.12 con ezsnmp (M9)
 ├── Dockerfile
 ├── .dockerignore
+├── compose.yaml                    # cómo se ejecuta: volumen, .env, usuario, red (§5.4)
 ├── .gitlab-ci.yml
+├── .env.example                    # plantilla del .env (no versionado) del clon
+├── data/                           # sólo archivos generados; se monta como volumen
+│   ├── errores.db                  # ignorado por git
+│   └── logs/                       # ignorado por git
 ├── deploy/
 │   ├── actualizar.sh               # script del cron (§6)
-│   ├── monitoreo.env.example       # plantilla de /etc/monitoreo-ups/monitoreo.env
 │   └── telegraf-monitoreo-ups.conf # snippet de Telegraf (§5.4)
 ├── src/
-│   └── monitoreo_ups/
-│       ├── __init__.py
-│       ├── __main__.py             # permite `python -m monitoreo_ups`
-│       ├── main.py                 # def run() -> int
-│       ├── config/
-│       ├── core/
-│       ├── drivers/
-│       └── infraestructura/
-│           └── schema.sql          # antes data/creacion_tabla_state.sql
+│   ├── main.py                     # punto de entrada: python src/main.py
+│   ├── config/
+│   ├── core/
+│   ├── drivers/
+│   └── infraestructura/
+│       └── schema.sql              # antes data/creacion_tabla_state.sql
 └── tests/
 ```
 
 ### 3.2 Pasos
 
-1. Instalar uv en las máquinas de desarrollo (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
-2. Mover el código a `src/monitoreo_ups/` y reemplazar los imports `config.` / `core.` / ... por `monitoreo_ups.config.` / ...
-3. Mover el SQL dentro del paquete y leerlo con `importlib.resources.files("monitoreo_ups.infraestructura") / "schema.sql"`. Con `--no-editable`, en el contenedor sólo queda el paquete instalado, no el árbol del repo.
-4. Crear el `pyproject.toml` (§3.3) y fijar la versión de Python con `uv python pin 3.12`.
-5. `uv lock` y versionar `uv.lock`.
-6. `uv sync` para crear `.venv/` con todas las dependencias, incluidas las de desarrollo.
-7. Borrar `pytest.ini` (su configuración pasa al `pyproject.toml`) y adaptar el Makefile.
-8. Comandos del día a día:
+> **Estado: implementado** (pasos 8 y 9), salvo mover el SQL, que queda para el paso 7.
+
+1. Instalar uv en las máquinas de desarrollo (`curl -LsSf https://astral.sh/uv/install.sh | sh`) y agregar `~/.local/bin` al `PATH`.
+2. `uv init --bare` y `uv python pin 3.10` (ver M9 sobre la versión).
+3. `uv add` de las dependencias de producción y `uv add --dev` de las de desarrollo: crea `uv.lock` y `.venv/`.
+4. Configuración de pytest, coverage, ruff y mypy en el `pyproject.toml`; borrar `pytest.ini`.
+5. Makefile basado en uv (B6): `make check` corre lo mismo que el CI.
+6. Comandos del día a día:
 
    ```bash
-   uv run monitoreo-ups          # ejecutar
-   uv run pytest                 # tests + cobertura
+   uv run python src/main.py     # ejecutar
+   uv run pytest --cov           # tests + cobertura
    uv run ruff check --fix .     # lint
    uv run ruff format .          # formato
    uv run mypy                   # tipado
    uv add <paquete>              # nueva dependencia (actualiza pyproject y lock)
    uv lock --upgrade             # actualizar dependencias
+   make check                    # lint + tipado + tests + auditoría, igual que el CI
    ```
 
-> Para compilar `easysnmp` localmente sigue haciendo falta `sudo apt install build-essential libsnmp-dev`.
+### 3.3 `pyproject.toml`
 
-### 3.3 `pyproject.toml` propuesto
+Configuración actual (ver [pyproject.toml](../pyproject.toml)). Arranca con reglas mínimas para que el CI pueda bloquear desde el primer día:
+
+| Herramienta | Hoy                                                     | Objetivo (paso 11)                                                               |
+| ----------- | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| ruff        | `E4`, `E7`, `E9`, `F`, `I` (reglas por defecto + isort) | Sumar `W`, `B`, `UP`, `SIM`, `N`, `S`, `PL`, `PT`, `RUF`, `LOG`, `G` de a grupos |
+| mypy        | modo por defecto sobre `src/`; pasa sin errores         | `strict = true`, `warn_unreachable`, incluir los tests                           |
+| coverage    | `fail_under = 60`; cobertura real 95 %                  | Subir `fail_under` cerca del valor real; sumar `exclude_also`                    |
+| pytest      | `testpaths = ["test"]`                                  | `tests/` (paso 7)                                                                |
+
+Reglas de ruff a sumar en el paso 11, con su propósito:
 
 ```toml
-[project]
-name = "monitoreo-ups"
-version = "2.0.0"
-description = "Monitoreo SNMP de UPS del datacenter PSI con salida en line protocol para Telegraf/InfluxDB y alertas a Google Chat."
-readme = "README.md"
-requires-python = ">=3.12,<3.14"
-authors = [
-    { name = "Nicolas Piñera" },
-    { name = "Juan Vizgarra" },
-]
-license = { text = "Propietario" }
-classifiers = [
-    "Private :: Do Not Upload",
-    "Programming Language :: Python :: 3.12",
-]
-dependencies = [
-    "easysnmp>=0.2.6",
-    "httplib2>=0.22",        # se puede eliminar si se migra a requests (A5)
-    "python-dotenv>=1.0",    # sólo para desarrollo local; en Docker se usa --env-file
-    # seqlog se elimina: Seq no se usa (M1)
-]
-
-[project.scripts]
-monitoreo-ups = "monitoreo_ups.main:run"
-
-[dependency-groups]
-dev = [
-    "pytest>=8.3",
-    "pytest-cov>=5.0",
-    "ruff>=0.7",
-    "mypy>=1.13",
-    "pip-audit>=2.7",
-    "types-httplib2",
-]
-
-[build-system]
-requires = ["hatchling>=1.25"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/monitoreo_ups"]
-
-[tool.uv]
-default-groups = ["dev"]
-
-# ------------------------------------------------------------------ pytest
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = [
-    "-ra",
-    "--strict-markers",
-    "--strict-config",
-    "--cov=monitoreo_ups",
-    "--cov-report=term-missing",
-    "--cov-report=xml",
-    "--junitxml=report.xml",
-]
-
-# ------------------------------------------------------------------ coverage
-[tool.coverage.run]
-branch = true
-source = ["monitoreo_ups"]
-
-[tool.coverage.report]
-fail_under = 80          # empezar en el valor real actual y subirlo en cada fase
-show_missing = true
-exclude_also = [
-    "if __name__ == .__main__.:",
-    "raise NotImplementedError",
-    "@abstractmethod",
-]
-
-# ------------------------------------------------------------------ ruff
-[tool.ruff]
-target-version = "py312"
-line-length = 100
-src = ["src", "tests"]
-
 [tool.ruff.lint]
 select = [
     "E", "W",   # pycodestyle
@@ -482,34 +571,17 @@ select = [
     "LOG",      # buenas prácticas de logging
     "G",        # formato de mensajes de logging (evita f-strings, ver M1)
 ]
-ignore = [
-    "PLR2004",  # magic values: los umbrales viven en config
-]
+ignore = ["PLR2004"]   # magic values: los umbrales viven en config
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004"]
-
-[tool.ruff.format]
-quote-style = "double"
-
-# ------------------------------------------------------------------ mypy
-[tool.mypy]
-python_version = "3.12"
-files = ["src", "tests"]
-strict = true
-warn_unreachable = true
-pretty = true
-
-[[tool.mypy.overrides]]
-module = ["easysnmp.*"]
-ignore_missing_imports = true
 ```
 
 Notas:
 
-- Si `fail_under = 80` es demasiado alto para el primer merge, arrancar con el valor actual (≈30–40 %, a medir) y subirlo en cada fase. La regla es que **nunca baje**.
-- `strict = true` en mypy es viable porque el código es chico. Si bloquea demasiado al principio, usar `strict = false` + `disallow_untyped_defs = true` y endurecerlo después.
+- La regla de `fail_under` es que **nunca baje**.
 - `S` (bandit) cubre los chequeos de seguridad estáticos del código; `pip-audit` cubre las dependencias.
+- Con `package = false` no hay `[build-system]` ni `[project.scripts]`: no se construye ningún wheel. Si algún día hiciera falta instalarlo como paquete, recién ahí conviene pasar a `src/monitoreo_ups/`.
 
 ---
 
@@ -531,103 +603,36 @@ Configuración en GitLab:
 - `main` como **rama protegida**: sólo se mergea por MR con aprobación de CODEOWNERS. Esto importa porque el cron de la VM construye y ejecuta lo que esté en `main` (§6.4).
 - Pipeline programado (**CI/CD → Schedules**) semanal sobre `main` que corra `audit`, para enterarse de CVEs nuevas aunque no haya cambios.
 
-### 4.2 `.gitlab-ci.yml` propuesto
+### 4.2 `.gitlab-ci.yml`
 
-```yaml
-stages:
-  - calidad
-  - test
-  - seguridad
-  - build
+> **Estado: implementado** (paso 10), ver [.gitlab-ci.yml](../.gitlab-ci.yml). Jobs: `ruff`, `mypy` (con `allow_failure: true` hasta el paso 11), `pytest` con reportes JUnit y Cobertura en el MR, y `pip-audit`. El CI no instala `libsnmp-dev`, porque el wheel de easysnmp para 3.10 ya incluye `libnetsnmp` (M9).
 
-variables:
-  UV_VERSION: "0.9" # fijar a una versión exacta
-  PYTHON_IMAGE: "python:3.12-slim-bookworm"
-  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
-  UV_LINK_MODE: "copy"
-  UV_FROZEN: "1" # usar exactamente uv.lock
+Pendiente:
 
-workflow:
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_PIPELINE_SOURCE == "schedule"
+- **Job `docker-build`** (paso 13), si el runner permite Docker-in-Docker:
 
-.uv:
-  image: $PYTHON_IMAGE
-  cache:
-    key:
-      files: [uv.lock]
-    paths: [.uv-cache]
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential libsnmp-dev
-    - pip install --quiet "uv==${UV_VERSION}.*"
-    - uv sync --locked
-  after_script:
-    - uv cache prune --ci
+  ```yaml
+  docker-build:
+    stage: build # agregar "build" a stages
+    image: docker:27
+    services: [docker:27-dind]
+    variables:
+      DOCKER_TLS_CERTDIR: "/certs"
+    rules:
+      - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    script:
+      - docker build -t monitoreo-ups:ci .
+      - docker run --rm --network none --entrypoint python monitoreo-ups:ci -c "import main"
+  ```
 
-ruff:
-  extends: .uv
-  stage: calidad
+- **Pipeline programado sólo para auditar:** hoy el schedule semanal corre todos los jobs. Para que corra sólo `pip-audit`, agregar a `ruff`, `mypy` y `pytest`:
+
+  ```yaml
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
-  script:
-    - uv run ruff check --output-format=gitlab --output-file=gl-code-quality.json . || (uv run ruff check . && false)
-    - uv run ruff format --check .
-  artifacts:
-    when: always
-    reports:
-      codequality: gl-code-quality.json
+  ```
 
-mypy:
-  extends: .uv
-  stage: calidad
-  rules:
-    - if: $CI_PIPELINE_SOURCE != "schedule"
-  script:
-    - uv run mypy
-
-pytest:
-  extends: .uv
-  stage: test
-  rules:
-    - if: $CI_PIPELINE_SOURCE != "schedule"
-  script:
-    - uv run pytest
-  coverage: '/TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage.xml
-
-pip-audit:
-  image: $PYTHON_IMAGE
-  stage: seguridad
-  before_script:
-    - pip install --quiet "uv==${UV_VERSION}.*"
-  script:
-    # Se audita el lock exportado (versiones exactas + hashes), sin compilar easysnmp.
-    - uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
-    - uvx pip-audit --strict --disable-pip --require-hashes -r requirements.txt
-  artifacts:
-    when: on_failure
-    paths: [requirements.txt]
-
-docker-build:
-  stage: build
-  image: docker:27
-  services: [docker:27-dind]
-  variables:
-    DOCKER_TLS_CERTDIR: "/certs"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-  script:
-    - docker build -t monitoreo-ups:ci .
-    - docker run --rm --network none --entrypoint python monitoreo-ups:ci -c "import monitoreo_ups"
-```
+- **Opcional:** reporte de Code Quality de ruff en el MR (`ruff check --output-format=gitlab --output-file=gl-code-quality.json`, publicado como `artifacts:reports:codequality`).
 
 Notas:
 
@@ -642,13 +647,15 @@ Notas:
 
 ### 5.1 Decisiones
 
-- **Imagen base:** `python:3.12-slim-bookworm`. Build en dos etapas: el builder tiene compilador y `libsnmp-dev`; la imagen final sólo lleva la biblioteca de runtime `libsnmp40`.
-- **Usuario no root** (UID fijo `10001`) dentro del contenedor.
-- **Contenedor efímero:** Telegraf hace `docker run --rm` en cada intervalo. La imagen no tiene `CMD` de larga duración.
-- **Estado fuera de la imagen:** volumen `/var/lib/monitoreo-ups` → `/data` (SQLite). Ver [A6](#a6-el-estado-y-los-secretos-viven-dentro-del-repo).
-- **Secretos fuera de la imagen:** `--env-file /etc/monitoreo-ups/monitoreo.env`. **Nunca** hacer `COPY .env`.
+- **Imagen base:** `python:3.12-slim-bookworm`, con `ezsnmp` en lugar de easysnmp (M9). Su wheel incluye `libnetsnmp`, así que la imagen no necesita compilador, `libsnmp-dev` ni `libsnmp40`. Build en dos etapas igual, para no llevar uv a la imagen final.
+- **Sin instalar el proyecto:** la imagen lleva el `.venv/` con las dependencias y una copia de `src/` en `/app/src`. Se ejecuta con `python /app/src/main.py`, igual que hoy en la VM.
+- **Usuario no root:** la imagen crea el usuario `ups` (UID `10001`), pero en producción el contenedor corre con el UID del dueño del clon (`user:` del `compose.yaml`, §5.4), para que los archivos de `data/` tengan el mismo dueño dentro y fuera del contenedor.
+- **Contenedor efímero:** Telegraf hace `docker compose run --rm` en cada intervalo. La imagen no tiene `CMD` de larga duración.
+- **Configuración de ejecución en `compose.yaml`:** volumen, `.env`, usuario y red quedan versionados en la raíz del repo, no en el `.conf` de Telegraf. Un cambio ahí llega con el deploy, sin tocar Telegraf.
+- **Estado fuera de la imagen:** volumen `/etc/telegraf/monitoreo-ups/data` → `/app/data` (SQLite y logs). Ver [A6](#a6-rutas-de-la-base-y-del-env-no-preparadas-para-docker).
+- **Secretos fuera de la imagen:** `env_file: .env` en el `compose.yaml`. **Nunca** hacer `COPY .env`.
 - **Red:** `--network host`, para llegar a los UPS por SNMP con la misma resolución DNS y rutas que la VM, sin configurar redes de Docker.
-- **stdout limpio:** en stdout sólo puede salir line protocol, los logs van a stderr (M1). No usar `-t` en `docker run`, porque la TTY agrega `\r` y rompe el parseo.
+- **stdout limpio:** en stdout sólo puede salir line protocol. Los logs van sólo a `/app/data/logs/monitoreo.log`, dentro del volumen (M1). Ejecutar siempre sin TTY (`-T` en `docker compose run`), porque la TTY agrega `\r` y rompe el parseo.
 
 ### 5.2 `Dockerfile` propuesto
 
@@ -658,11 +665,7 @@ ARG PYTHON_VERSION=3.12
 
 # ---------- builder ----------
 FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /uvx /bin/
-
-RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential libsnmp-dev \
- && rm -rf /var/lib/apt/lists/*
+COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -670,43 +673,41 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# 1) Dependencias (capa cacheada mientras no cambie uv.lock)
+# Sólo dependencias: el proyecto no se instala (package = false).
+# Capa cacheada mientras no cambien uv.lock ni pyproject.toml.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-dev --no-install-project
-
-# 2) Proyecto
-COPY pyproject.toml uv.lock README.md ./
-COPY src ./src
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-editable
+    uv sync --locked --no-dev
 
 # ---------- runtime ----------
 FROM python:${PYTHON_VERSION}-slim-bookworm
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends libsnmp40 \
- && rm -rf /var/lib/apt/lists/* \
- && useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin ups \
- && mkdir -p /data && chown ups /data
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin ups \
+ && mkdir -p /app/data && chown ups /app/data
 
+WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
+COPY src ./src
 
 ARG GIT_SHA=desconocido
 LABEL org.opencontainers.image.title="monitoreo-ups" \
       org.opencontainers.image.revision="${GIT_SHA}"
 
 ENV PATH="/app/.venv/bin:${PATH}" \
+    PYTHONPATH=/app/src \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    MONITOREO_DATA_DIR=/data \
     MONITOREO_VERSION="${GIT_SHA}"
 
+# En producción se pisa con user: del compose.yaml (UID del dueño del clon, §5.4)
 USER ups
-VOLUME ["/data"]
-ENTRYPOINT ["monitoreo-ups"]
+ENTRYPOINT ["python", "/app/src/main.py"]
 ```
+
+- `RUTA_RAIZ` se calcula como `/app`, así que la base y los logs quedan en `/app/data` sin definir variables de entorno (A6).
+- `PYTHONPATH=/app/src` permite el smoke test `python -c "import main"` (§4.2 y §6.2).
+- No se declara `VOLUME`: el volumen se monta siempre de forma explícita con `-v`. Así una corrida sin `-v` falla a la vista en lugar de crear volúmenes anónimos que se acumulan.
 
 > Si el `COPY --from=ghcr.io/...` no funciona porque la VM no tiene salida a ghcr.io, reemplazarlo por `RUN pip install "uv==<versión>"` en el builder.
 
@@ -715,11 +716,12 @@ ENTRYPOINT ["monitoreo-ups"]
 ```text
 .git
 .gitlab-ci.yml
+compose.yaml
 .venv
 venv
 .env
 *.env
-data/*.db
+data
 logs
 docs
 tests
@@ -735,46 +737,95 @@ report.xml
 
 ### 5.4 Ejecución desde Telegraf
 
+Todo vive en el clon `/etc/telegraf/monitoreo-ups`, y un único usuario (`telegraf`) es dueño del clon, ejecuta el contenedor y corre el cron de deploy (§6.3). Un usuario aparte para el deploy no agregaría aislamiento real, porque los dos estarían en el grupo `docker`.
+
+```text
+/etc/telegraf/monitoreo-ups/        dueño: telegraf
+├── compose.yaml                    versionado: cómo se ejecuta el contenedor
+├── .env                            secretos + UID/GID (600, ignorado por git) ──▶ env_file
+└── data/                           ──▶ volumen en /app/data
+    ├── errores.db                  estado de alertas (ignorado por git)
+    └── logs/
+        ├── monitoreo.log*          log de la aplicación, rotativo (M1)
+        └── deploy.log*             log del cron de deploy (§6.3)
+```
+
+**Logs:** la base y los logs comparten el mismo volumen (`data/`), así que alcanza con un solo volumen. Hoy los logs se escriben en `logs/` en la raíz del repo; con el cambio de A6 pasan a `data/logs/` (el patrón `logs/` del `.gitignore` los cubre en cualquier nivel). Como el contenedor es efímero, si los logs no estuvieran en el volumen se perderían en cada ejecución. El `RotatingFileHandler` rota dentro del volumen igual que sin Docker. Para leerlos: `tail -f /etc/telegraf/monitoreo-ups/data/logs/monitoreo.log`.
+
 Preparación de la VM (una sola vez):
 
 ```bash
-sudo mkdir -p /var/lib/monitoreo-ups /etc/monitoreo-ups
-sudo chown 10001 /var/lib/monitoreo-ups                   # UID del usuario del contenedor
-sudo cp <clon_viejo>/data/errores.db /var/lib/monitoreo-ups/   # conservar el estado de alertas
-sudo chown 10001 /var/lib/monitoreo-ups/errores.db
-sudo install -m 600 -o root -g telegraf deploy/monitoreo.env.example /etc/monitoreo-ups/monitoreo.env
-# editar /etc/monitoreo-ups/monitoreo.env con los valores reales
+cd /etc/telegraf/monitoreo-ups
+sudo chown -R telegraf:telegraf .                 # un solo dueño para clon, base y logs
+sudo -u telegraf mkdir -p data/logs
+sudo -u telegraf mv logs/* data/logs/ 2>/dev/null; sudo rmdir logs   # logs viejos (opcional)
+# .env: formato CLAVE=valor (A6) y agregar UID_TELEGRAF / GID_TELEGRAF
+sudo chmod 600 .env && sudo chown telegraf:telegraf .env
 sudo usermod -aG docker telegraf && sudo systemctl restart telegraf
+id -u telegraf; id -g telegraf                    # valores de UID_TELEGRAF y GID_TELEGRAF
+sudo apt install docker-compose-plugin            # si `docker compose version` falla
 ```
+
+La base `data/errores.db` ya está en su lugar, así que **no hay que migrar el estado de las alertas**.
 
 > **Seguridad:** pertenecer al grupo `docker` equivale a tener acceso root en la VM. Es aceptable en una VM dedicada al monitoreo; si no lo es, usar Docker rootless o un wrapper con una regla de `sudoers` acotada.
 
-`/etc/monitoreo-ups/monitoreo.env` (plantilla en `deploy/monitoreo.env.example`):
+`.env` del clon (plantilla en [.env.example](../.env.example)):
 
 ```dotenv
 GOOGLE_CHAT_WEBHOOK_URL=https://chat.googleapis.com/v1/spaces/...
 SNMP_COMMUNITY=...
 SNMP_TIMEOUT=1
 SNMP_RETRIES=1
-LOG_LEVEL=WARNING
+LOG_LEVEL=INFO
 MAX_WORKERS=13
+UID_TELEGRAF=<id -u telegraf>
+GID_TELEGRAF=<id -g telegraf>
 ```
+
+- `LOG_LEVEL` es el nivel del archivo `data/logs/monitoreo.log`, el único destino de los logs.
+- `UID_TELEGRAF`/`GID_TELEGRAF` no los usa la aplicación: compose lee automáticamente el `.env` de la carpeta del `compose.yaml` para completar las variables `${...}`. Así el UID de la VM no queda en git.
+- No poner comentarios al final de una línea.
+
+`compose.yaml` (en la raíz del repo, versionado):
+
+```yaml
+name: monitoreo-ups
+
+services:
+  monitoreo:
+    image: monitoreo-ups:prod
+    pull_policy: never # la imagen es local: la construye y promueve el deploy (§6)
+    network_mode: host
+    user: "${UID_TELEGRAF:?falta en .env}:${GID_TELEGRAF:?falta en .env}"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+```
+
+- Las rutas relativas (`./data`, `.env`) se resuelven desde la carpeta del `compose.yaml`, o sea, el clon. En el contenedor `data/` del clon se ve como `/app/data`, que es la ruta que calcula el código (A6).
+- **No tiene `build:`** a propósito: si lo tuviera, un `run` podría construir una imagen nueva y saltear el smoke test y la promoción a `:prod` de `actualizar.sh`. El build sólo lo hace el script de deploy.
+- `${VAR:?mensaje}` hace que compose falle con un mensaje claro si falta la variable en el `.env`.
 
 Snippet de Telegraf (`deploy/telegraf-monitoreo-ups.conf` → `/etc/telegraf/telegraf.d/`):
 
 ```toml
 [[inputs.exec]]
   commands = [
-    "docker run --rm --pull never --network host -v /var/lib/monitoreo-ups:/data --env-file /etc/monitoreo-ups/monitoreo.env monitoreo-ups:prod",
+    "docker compose -f /etc/telegraf/monitoreo-ups/compose.yaml run --rm -T monitoreo",
   ]
   interval = "60s"     # mantener el intervalo actual
-  timeout  = "50s"     # < interval; medir la duración real tras A5 y ajustar
+  timeout  = "30s"     # peor caso medido tras A5: ~6 s
   data_format = "influx"
 ```
 
-- `--pull never`: la imagen sólo existe localmente, así que no se intenta buscarla en Docker Hub.
+- **`run`, no `up`:** `up` está pensado para servicios que quedan corriendo. Antepone el nombre del contenedor a cada línea de salida (`monitoreo-1  | ups_temp2,...`), lo que rompe el line protocol. Además no devuelve el código de salida del programa y reutiliza el mismo contenedor entre ejecuciones. `run --rm` crea un contenedor nuevo en cada ejecución, deja stdout limpio, devuelve el código de salida real y borra el contenedor al terminar. Si dos ejecuciones se superponen, no chocan.
+- **`-T`:** sin TTY. Con TTY se agrega `\r` al final de cada línea.
+- **`-f` con ruta absoluta en lugar de `cd ... &&`:** `inputs.exec` no pasa el comando por un shell, así que `&&` no se interpreta.
+- Los mensajes propios de compose (`Container ... Creating`) van a stderr, no a stdout, así que no ensucian el line protocol.
+- Para correrlo a mano en la VM: `cd /etc/telegraf/monitoreo-ups && sudo -u telegraf docker compose run --rm -T monitoreo`.
 - `monitoreo-ups:prod` es un **alias estable** que el script de deploy mueve recién cuando un build nuevo pasó el smoke test.
-- El arranque del contenedor suma alrededor de 0,5–1 s por ejecución, despreciable frente a los tiempos de SNMP.
+- El arranque del contenedor con compose suma alrededor de 1 s por ejecución (a medir), despreciable frente a los tiempos de SNMP.
 
 **Rollback manual:** `docker tag monitoreo-ups:<sha_anterior> monitoreo-ups:prod`. Telegraf toma la imagen anterior en la siguiente ejecución.
 
@@ -790,9 +841,9 @@ cron (cada 5 min)
        ├─ flock: si ya hay un deploy corriendo, sale
        ├─ git fetch origin main
        ├─ ¿HEAD == origin/main y la imagen <sha> existe? → sale (no hay cambios)
-       ├─ git reset --hard origin/main + git clean -fd   (la VM nunca tiene cambios locales → sin conflictos)
+       ├─ git reset --hard origin/main + git clean -fd   (no toca .env ni data/: están ignorados)
        ├─ docker build -t monitoreo-ups:<sha>
-       ├─ smoke test: docker run --network none ... import monitoreo_ups
+       ├─ smoke test: docker run --network none ... import main
        ├─ docker tag monitoreo-ups:<sha> monitoreo-ups:prod   ← recién acá cambia producción
        ├─ borrar tags viejos (conserva los últimos N) + docker image prune -f
        └─ (opcional) avisar a Google Chat del deploy o del fallo
@@ -810,13 +861,13 @@ Si el build o el smoke test fallan, `:prod` sigue apuntando a la imagen anterior
 # Pensado para ejecutarse desde cron. Idempotente: si no hay cambios, no hace nada.
 set -Eeuo pipefail
 
-REPO_DIR="${REPO_DIR:-/opt/monitoreo-ups}"
+REPO_DIR="${REPO_DIR:-/etc/telegraf/monitoreo-ups}"
 BRANCH="${BRANCH:-main}"
 IMAGE="${IMAGE:-monitoreo-ups}"
 PROD_TAG="${PROD_TAG:-prod}"
 KEEP_IMAGES="${KEEP_IMAGES:-3}"
 LOCK_FILE="${LOCK_FILE:-/var/lock/monitoreo-ups-deploy.lock}"
-ENV_FILE="${ENV_FILE:-/etc/monitoreo-ups/monitoreo.env}"
+ENV_FILE="${ENV_FILE:-$REPO_DIR/.env}"
 
 log() { echo "$(date --iso-8601=seconds) [deploy] $*"; }
 
@@ -850,6 +901,7 @@ main() {
 
   log "Actualizando $local_sha -> $remote_sha"
   git reset --hard --quiet "origin/$BRANCH"
+  # Sin -x: los archivos ignorados (.env, data/errores.db, data/logs/) no se tocan.
   git clean -fd --quiet
 
   log "Construyendo $IMAGE:$short_sha"
@@ -859,7 +911,7 @@ main() {
 
   log "Smoke test"
   docker run --rm --network none --entrypoint python "$IMAGE:$short_sha" \
-    -c "import monitoreo_ups.main"
+    -c "import main"
 
   docker tag "$IMAGE:$short_sha" "$IMAGE:$PROD_TAG"
   log "Promovida $IMAGE:$short_sha a :$PROD_TAG"
@@ -875,7 +927,7 @@ main() {
   notificar "✅ monitoreo-ups desplegado: ${short_sha}"
 }
 
-trap 'log "ERROR en línea $LINENO"; notificar "❌ Falló el deploy de monitoreo-ups (ver /var/log/monitoreo-ups/deploy.log)"' ERR
+trap 'log "ERROR en línea $LINENO"; notificar "❌ Falló el deploy de monitoreo-ups (ver data/logs/deploy.log)"' ERR
 
 # Todo el cuerpo está en main(): bash lee el script completo antes de ejecutarlo,
 # así un `git reset` que modifique este archivo no afecta a la ejecución en curso.
@@ -886,104 +938,135 @@ main "$@"
 
 ### 6.3 Instalación en la VM
 
+````bash
+Se reutiliza el clon existente en `/etc/telegraf/monitoreo-ups`, ya preparado en §5.4 (dueño `telegraf`, en el grupo `docker`).
+
 ```bash
-# 1. Usuario de servicio con acceso a docker (no usar el usuario personal)
-sudo useradd --system --create-home --groups docker deploy-ups
-
-# 2. Deploy token de sólo lectura (GitLab → Settings → Repository → Deploy tokens, scope read_repository)
-sudo -u deploy-ups git clone https://<token_user>:<token>@<gitlab>/<grupo>/monitoreo-ups.git /opt/monitoreo-ups
+# 1. Deploy token de sólo lectura (GitLab → Settings → Repository → Deploy tokens, scope read_repository)
+cd /etc/telegraf/monitoreo-ups
+sudo -u telegraf git remote set-url origin https://<token_user>:<token>@<gitlab>/<grupo>/monitoreo-ups.git
 #    (o una deploy key SSH de sólo lectura)
+sudo -u telegraf git status   # tiene que estar limpio; si hay cambios locales, guardarlos antes del primer reset
 
-# 3. Log
-sudo mkdir -p /var/log/monitoreo-ups && sudo chown deploy-ups /var/log/monitoreo-ups
+# 2. Primer deploy manual
+sudo -u telegraf /etc/telegraf/monitoreo-ups/deploy/actualizar.sh
 
-# 4. Primer deploy manual
-sudo -u deploy-ups /opt/monitoreo-ups/deploy/actualizar.sh
+# 3. Cron (crontab -e -u telegraf)
+*/5 * * * * /etc/telegraf/monitoreo-ups/deploy/actualizar.sh >> /etc/telegraf/monitoreo-ups/data/logs/deploy.log 2>&1
 
-# 5. Cron (crontab -e -u deploy-ups)
-*/5 * * * * /opt/monitoreo-ups/deploy/actualizar.sh >> /var/log/monitoreo-ups/deploy.log 2>&1
+# 4. Rotación del log (/etc/logrotate.d/monitoreo-ups)
+/etc/telegraf/monitoreo-ups/data/logs/deploy.log { weekly rotate 8 compress missingok notifempty su telegraf telegraf }
+````
 
-# 6. Rotación del log (/etc/logrotate.d/monitoreo-ups)
-/var/log/monitoreo-ups/deploy.log { weekly rotate 8 compress missingok notifempty }
-```
-
-Cambiar `LOCK_FILE` a una ruta donde `deploy-ups` pueda escribir si `/var/lock` no lo permite.
+- El log del deploy queda junto al de la aplicación, en `data/logs/`, así todos los logs están en un solo lugar. `deploy.log` lo rota `logrotate`; `monitoreo.log` lo rota la propia aplicación (M1).
+- Cambiar `LOCK_FILE` a una ruta donde `telegraf` pueda escribir si `/var/lock` no lo permite (en Debian/Ubuntu es `/run/lock`, escribible por todos). No ponerlo dentro del clon: `git clean -fd` lo borraría.
 
 > Un `systemd timer` reemplaza bien a cron: da logs en `journalctl` y evita ejecuciones superpuestas de forma nativa. Es opcional; cron + `flock` alcanza.
 
 ### 6.4 Consideraciones
 
 - **Seguridad de la cadena de deploy:** lo que llega a `main` se construye y ejecuta en la VM con permisos de docker. Por eso `main` tiene que estar protegida, con MR obligatorio y el pipeline en verde (§4.1). El clon usa un token de **sólo lectura**.
-- **Sin conflictos:** la VM no tiene cambios propios (el estado y los secretos están fuera del clon), así que `git reset --hard` es seguro y reemplaza al `git pull` manual.
+- **Sin conflictos:** la VM no tiene cambios propios versionados. El estado, los logs y los secretos están en el clon pero ignorados por git, así que `git reset --hard` y `git clean -fd` (sin `-x`) no los tocan y reemplazan al `git pull` manual.
 - **Latencia del deploy:** como mucho 5 minutos más la duración del build. El build es rápido mientras no cambie `uv.lock`, gracias al caché de capas.
 - **Salida a internet:** el build necesita llegar a Docker Hub (imagen base), ghcr.io (uv) y PyPI. Si la VM sale por un proxy, configurarlo en `/etc/systemd/system/docker.service.d/` y pasarlo como `--build-arg`.
-- **Cambiar la VM sin tocar el repo:** si cambian el webhook, los timeouts o el nivel de log, se edita `/etc/monitoreo-ups/monitoreo.env` y no hace falta un deploy.
+- **Cambiar la VM sin tocar el repo:** si cambian el webhook, los timeouts o el nivel de log, se edita `/etc/telegraf/monitoreo-ups/.env` y no hace falta un deploy.
 
 ---
 
 ## 7. Hoja de ruta por fases
 
-Cada fase es un MR independiente, en este orden. Las fases 1 y 2 se pueden hacer en paralelo con la fase 0.
+Cada paso es **un MR independiente**, en este orden. El orden sigue tres criterios:
 
-### Fase 0 — Bugs críticos (sobre el código actual)
+1. **Primero los cambios chicos y aislados sobre el código actual.** Se pueden desplegar enseguida y corrigen bugs que hoy afectan a producción.
+2. **Después las herramientas** (paquete, uv, formato, CI). Así los refactors grandes llegan con lint, tipado y tests protegiendo, y sus diffs no se mezclan con cambios de formato.
+3. **Al final los refactors de dominio**, cuando ya existe el deploy automático y cada cambio llega a la VM solo.
 
-- [ ] A2: aislar cada driver en `try/except` y salir con código 0 si hubo métricas.
-- [ ] A4 / A3: `ClienteSNMP` devuelve `float | None` y detecta `NOSUCH*`.
-- [ ] A1: no publicar ni validar métricas sin dato; agregar el error `SIN_RESPUESTA_SNMP`.
-- [ ] A5: timeouts de SNMP y HTTP; quitar `time.sleep(1)`.
-- [ ] A8: persistir el cambio de estado sólo si la notificación salió bien.
-- [ ] M2: imprimir desde el hilo principal.
-- [ ] Tests para cada uno de los puntos anteriores, con un cliente SNMP falso.
+| #     | Paso                                                                    | Tamaño | Depende de |
+| ----- | ----------------------------------------------------------------------- | ------ | ---------- |
+| ✅    | A1 — Métricas sin dato y `SIN_RESPUESTA_SNMP`                           | M      | —          |
+| ✅ 1  | Limpieza trivial (B2, B4, B10, comentarios residuales)                  | XS     | —          |
+| ✅ 2  | M1 — Eliminar seqlog, `logging` estándar                                | S      | —          |
+| ✅ 3  | A2 — Aislar drivers y código de salida                                  | S      | 2          |
+| ✅ 4  | M2 + M8 — Salida desde el hilo principal y control de futures           | S      | 3          |
+| ✅ 5  | A5 — Timeouts SNMP/HTTP                                                 | S      | —          |
+| ✅ 6  | A8 — No perder alertas si falla Google Chat                             | S      | —          |
+| ◐ 7   | B1 + B3 + B6 + B7 — Imports, `tests/`, SQL a `src/` y Makefile          | S      | 1–6        |
+| ✅ 8  | uv + `pyproject.toml` + `uv.lock`                                       | S      | 7          |
+| ✅ 9  | `ruff --fix` + `ruff format` (sólo formato)                             | S      | 8          |
+| ✅ 10 | A7 — CI nuevo (ruff, pytest + cobertura, pip-audit; mypy no bloqueante) | M      | 9          |
+| 11    | B5 — Type hints, mypy `strict` y reglas completas de ruff               | M      | 10         |
+| 12    | A6 + M7 — Configuración y secretos por variables de entorno             | M      | 8          |
+| 13    | Docker + `ezsnmp` y Python 3.12 (M9)                                    | M      | 12         |
+| 14    | Deploy automático (cron, Telegraf con `docker compose run`, corte)      | M      | 13         |
+| 15    | M5 — Modelo de la tabla de errores                                      | M      | 14         |
+| 16    | M4 — Contrato `BaseUPS` homogéneo                                       | L      | 14         |
+| 17    | M6 — Reglas de validación declarativas y alertas estructuradas          | L      | 16         |
+| 18    | M10 — Mensajes de Google Chat con tarjetas                              | M      | 6, 15, 17  |
+| 19    | M3 — Alertas del UPS trifásico del DC                                   | M      | 16, 17     |
+| 20    | B8 — README y documentación final                                       | S      | todo       |
 
-### Fase 1 — uv + pyproject + reestructura del paquete
+A3 y A4 quedaron cubiertos en su mayor parte por A1. Lo único pendiente es **probar el fallback de `OIDTNEW` contra un UPS real** cuando se despliegue A1. B3 (tests) no es un paso aparte: cada MR suma los tests de lo que cambia. B9 (nombres de las mediciones) queda fuera del plan hasta que se coordine con los dashboards.
 
-- [ ] Mover el código a `src/monitoreo_ups/`, el SQL a `schema.sql` dentro del paquete y renombrar `test/` a `tests/` (B1, B3).
-- [ ] `pyproject.toml` (§3.3), `uv.lock` y `.python-version`.
-- [ ] Entry point `monitoreo-ups` y `__main__.py`; `main.run()` devuelve un código de salida.
-- [ ] `ruff check --fix` + `ruff format` en un **commit aparte** (para no ensuciar el diff funcional).
-- [ ] Eliminar `scrip/`, `pytest.ini` y los shebangs; actualizar el Makefile y `.gitignore` (B2, B6, B7, B10).
+### Etapa 1 — Correcciones sobre el código actual
 
-### Fase 2 — CI
+Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rápido porque corrigen comportamientos que hoy afectan a producción.
 
-- [ ] Nuevo `.gitlab-ci.yml` (§4.2).
-- [ ] Type hints hasta que `mypy` pase (B5).
-- [ ] Fijar `fail_under` en la cobertura real y subirlo.
-- [ ] Proteger `main` y activar "Pipelines must succeed".
-- [ ] Pipeline programado semanal para `pip-audit`.
+- [x] **A1:** no publicar ni validar métricas sin dato; error `SIN_RESPUESTA_SNMP`.
+- [x] **1. Limpieza trivial:** borrar `scrip/` (B2), `== None` → `is None` (B4), `.gitignore` (B10) y el comentario `# ,'f2r9u1'`. Va primero porque no tiene riesgo y saca ruido de los diffs que siguen.
+- [x] **2. M1:** `logging` estándar; configurar el logger dentro del `__main__`; reescribir las llamadas con kwargs. Va antes que A2 porque simplifica su manejo de errores y elimina un `TypeError` latente.
+- [x] **3. A2:** `try/except` por driver (incluida la creación del cliente SNMP); código de salida 0 si al menos un driver terminó bien.
+- [x] **4. M2 + M8:** los drivers devuelven sus líneas y `main` las imprime desde el hilo principal. La lectura del resultado de cada future ya quedó hecha en A2. Toca el mismo flujo que A2, por eso va justo después.
+- [x] **5. A5:** `timeout`/`retries` en SNMP, cortar el host tras el primer timeout, timeout HTTP (con `urllib.request` en lugar de httplib2), quitar `time.sleep(1)` y `max_workers` configurable.
+  - [X] Bajar el `timeout` de Telegraf en la VM a `30s` después de desplegar.
+- [x] **6. A8:** persistir el cambio de estado sólo si el envío fue exitoso; `notificador` y `rep_db` obligatorios en `StateUPS` en lugar del notificador nulo.
 
-### Fase 3 — Configuración externa + Docker
+### Etapa 2 — Herramientas
 
-- [ ] Rutas, comunidad SNMP, webhook, timeouts y nivel de log por variables de entorno (A6, M7).
-- [ ] M1: `uv remove seqlog`, `logging` estándar a stderr configurado dentro de `run()`, reescribir las llamadas con kwargs y borrar el código y la documentación de logging muertos.
-- [ ] `Dockerfile`, `.dockerignore` y `deploy/monitoreo.env.example`.
-- [ ] Validar que `easysnmp` compila en la imagen (M9); si no, migrar a `ezsnmp`.
-- [ ] Probar la imagen en la VM **en paralelo** al esquema actual: escribir a un bucket o measurement de prueba, con otra base SQLite y **sin webhook**, para no duplicar alertas.
+- [ ] **7. Ordenar la estructura (sin convertirla en paquete, §3.1):**
+  - [x] Imports de los tests sin el prefijo `src.` (B1) y sin `import *` en `test_validacion.py`.
+  - [x] Makefile basado en uv (B6).
+  - [ ] `test/` → `tests/` (B3) y actualizar `testpaths`, `src` de ruff y los imports `from test.conftest`.
+  - [ ] Mover el SQL a `src/infraestructura/schema.sql` (A6).
+  - [ ] Quitar los shebangs `#!/usr/bin/python3` de los 10 módulos de `src/` (B7).
+- [x] **8. uv:** `pyproject.toml` (§3.3), `uv.lock`, `.python-version` (3.10, ver M9); borrar `pytest.ini`.
+- [x] **9. Formato:** `ruff check --fix` + `ruff format` en un MR que **sólo** cambie formato, para que los refactors posteriores tengan diffs limpios. Con las reglas mínimas de §3.3; el resto se suma en el paso 11.
+- [x] **10. A7 — CI:** nuevo `.gitlab-ci.yml` (§4.2) con ruff, pytest + cobertura y pip-audit bloqueantes; mypy con `allow_failure: true` hasta el paso 11.
+  - [X] Configuración de GitLab (§4.1): proteger `main`, activar "Pipelines must succeed" y programar el pipeline semanal.
+- [ ] **11. B5:** mypy ya pasa en modo por defecto, así que se puede quitar el `allow_failure` enseguida. Después: type hints hasta que pase con `strict = true`, sumar los tests a mypy, ampliar las reglas de ruff de a grupos (§3.3) y subir `fail_under`. Va antes de los refactors grandes porque es cuando más ayuda.
 
-### Fase 4 — Deploy automático y corte
+### Etapa 3 — Despliegue automático
 
-- [ ] `deploy/actualizar.sh` y su instalación (§6.3).
-- [ ] Copiar `errores.db` al volumen, crear `/etc/monitoreo-ups/monitoreo.env` y agregar `telegraf` al grupo `docker`.
-- [ ] Cambiar el `[[inputs.exec]]` de Telegraf al `docker run` y verificar en Grafana que no haya huecos.
-- [ ] Hacer un cambio trivial en `main` y comprobar que se despliega solo en menos de 10 minutos.
-- [ ] Probar un rollback manual.
-- [ ] Retirar el clon viejo y las dependencias instaladas con `apt`.
+- [ ] **12. A6 + M7:** base y logs en `data/` (`data/logs/`), `.env` en formato `CLAVE=valor`, comunidad SNMP, webhook (renombrado a `GOOGLE_CHAT_WEBHOOK_URL`), timeouts y nivel de log por variables de entorno.
+- [ ] **13. Docker:**
+  - `Dockerfile`, `.dockerignore` y `compose.yaml`.
+  - Migrar a `ezsnmp` y Python 3.12 (M9): `snmp_client.py`, tests, `.python-version`, `requires-python`, `target-version` de ruff, `python_version` de mypy e imagen del CI.
+  - Probar la imagen en la VM **en paralelo** al esquema actual, con un `docker run` directo que monte otra carpeta como `/app/data` (por ejemplo `-v /tmp/monitoreo-prueba:/app/data`), sin webhook y escribiendo a un measurement de prueba.
+- [ ] **14. Deploy:**
+  - `deploy/actualizar.sh` y su cron (§6).
+  - Preparar el clon `/etc/telegraf/monitoreo-ups` (§5.4): dueño `telegraf`, `data/logs/`, `.env` con permisos 600. La base ya está en `data/`, no hay que migrarla.
+  - Agregar `UID_TELEGRAF`/`GID_TELEGRAF` al `.env` y cambiar Telegraf a `docker compose run`.
+  - Comprobar que un cambio trivial en `main` se despliega solo.
+  - Probar un rollback.
 
-### Fase 5 — Mejoras de dominio
+  A partir de acá, cada MR mergeado llega solo a la VM.
 
-- [ ] M4: contrato `BaseUPS` homogéneo, con OIDs inyectados y `ejecutar()` sin argumentos.
-- [ ] M6: reglas de validación declarativas, mensajes formateados en el notificador y uso del `Enum` en lugar de strings.
-- [ ] M3: alertas para el UPS trifásico del DC.
-- [ ] M5: elegir el modelo de la tabla (estado o historial), `UNIQUE`, WAL y cierre de conexiones.
-- [ ] M8: control de los futures.
-- [ ] B8: reescribir el README y actualizar `docs/arqui/` y `docs/logger/`.
+### Etapa 4 — Mejoras de dominio
+
+- [ ] **15. M5:** decidir si la tabla guarda estado o historial; `UNIQUE`/UPSERT, índice, WAL, cierre de conexiones. Opcional: exigir varias fallas seguidas antes de avisar `SIN_RESPUESTA_SNMP`. Va antes que M10 porque la duración de los incidentes sale de esta tabla.
+- [ ] **16. M4:** `BaseUPS` homogéneo, con OIDs inyectados y `ejecutar()` sin argumentos.
+- [ ] **17. M6:** reglas de validación declarativas con umbrales inyectados; el dominio devuelve objetos `Alerta` sin formato; usar el `Enum` en lugar de strings.
+- [ ] **18. M10:** `FormateadorGoogleChat` con tarjetas, umbral, duración, botón a Grafana e hilos por equipo.
+- [ ] **19. M3:** alertas para el UPS trifásico del DC, reutilizando las reglas (M6) y el formateador (M10). Incluye el aviso `SIN_RESPUESTA_SNMP` para el DC.
+- [ ] **20. B8:** reescribir el README y actualizar `docs/arqui/` y `docs/logger/`.
 
 ---
 
 ## 8. Preguntas abiertas
 
-1. ¿Cuál es el `interval` y el `timeout` actual del `[[inputs.exec]]` en Telegraf? Hacen falta para dimensionar los timeouts de SNMP (A5).
+1. ~~¿Cuál es el `interval` y el `timeout` actual del `[[inputs.exec]]` en Telegraf?~~ Respondida: `interval = "60s"`, `timeout = "60s"` (A5).
 2. ¿El runner de GitLab permite Docker-in-Docker (modo privilegiado)? Define si `docker-build` corre en el CI (§4.2).
 3. ¿La VM tiene salida directa a Docker Hub, ghcr.io y PyPI, o sale por un proxy? (§6.4)
 4. ¿La tabla `errores` se quiere como estado actual o como historial de incidentes? (M5)
 5. ¿Qué umbrales corresponden al UPS trifásico del DC? (M3)
 6. ¿Algún UPS tiene firmware viejo que use `OIDTNEW`? Sirve para probar A4 contra un equipo real.
+7. ¿Qué URL tiene el dashboard de Grafana de los UPS, y con qué variable filtra por host? (M10)

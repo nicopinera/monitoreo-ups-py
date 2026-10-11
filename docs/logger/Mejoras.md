@@ -1,101 +1,68 @@
-# Mejoras del sistema de logging
+# Logging del monitoreo UPS
 
-## 1. Qué se agregó
+> Estado actual, después de M1 del [plan de mejora v2](../plan_de_mejora_v2.md). Reemplaza la versión anterior de este documento, que describía una implementación que nunca llegó al código.
 
-Se creó un logger centralizado en `src/config/logger.py` que ahora administra:
+## Regla principal
 
-- `logs/app.log` para eventos normales y de información (`INFO+`).
-- `logs/errors.log` para errores y críticos (`ERROR+`).
-- Salida en consola para monitoreo en vivo (`INFO+`).
-- Un logger separado `telegraf` para imprimir métricas en formato puro a stdout.
+**stdout es sólo para Telegraf.** Lo único que se escribe en stdout son las líneas de line protocol (`ups_temp2,host=... battery=...`). Cualquier otro texto ahí hace que Telegraf no pueda parsear la salida. Por eso el logging nunca escribe en stdout, y un test lo verifica (`test_nunca_escribe_en_stdout`).
 
-Además, se agregó un archivo `logs/.gitignore` para que los archivos de log no se suban al repositorio.
+## A dónde van los logs
 
-## 2. Cómo cambia el comportamiento general
+**Sólo al archivo `logs/monitoreo.log`** (rotativo), desde `INFO` (configurable). No se escribe nada por consola: ni en stdout (reservado para Telegraf) ni en stderr. Para seguir una ejecución: `tail -f logs/monitoreo.log`.
 
-### Antes
+- **Rotación:** `monitoreo.log` rota a los 5 MB y se guardan 5 archivos viejos (`monitoreo.log.1` … `monitoreo.log.5`). Como máximo ocupa unos 30 MB.
+- **Formato:**
 
-- El código usaba `print()` en varios módulos para errores y métricas.
-- No había un punto único para almacenar eventos o errores.
-- Las métricas para Grafana se mezclaban potencialmente con otros mensajes.
-- El sistema no diferenciaba bien entre eventos normales e incidentes.
+  ```text
+  2026-10-09 14:32:05,123 WARNING infraestructura.snmp_client [ThreadPoolExecutor-0_3] Timeout SNMP en f1r2u1.psi.unc.edu.ar (oid=1.3.6.1.4.1.318.1.1.1.2.2.2.0)
+  ```
 
-### Ahora
+  Cada línea tiene: fecha · nivel · módulo que escribió el log · hilo (útil porque los UPS se consultan en paralelo) · mensaje.
 
-- El logger raíz centralizado recoge todos los mensajes de los módulos que lo usan.
-- Los errores y excepciones se guardan en `errors.log` con trazas completas cuando corresponde.
-- Los eventos normales siguen en `app.log` y en consola.
-- Las métricas de Telegraf (output para Grafana/Influx) se emiten por un logger independiente que no se propaga al logger raíz.
+- **Si no se puede crear el archivo** (falta de permisos, disco lleno), el monitoreo sigue funcionando y los logs van a stderr desde `WARNING`, con un aviso de por qué. Es el único caso en que aparece algo por consola; así los errores no se pierden.
 
-## 3. Qué respetó de `docs/Loggin.md`
+## Configuración
 
-### Separación de métricas Telegraf y logs
+Por variables de entorno del proceso. En Telegraf se definen con la opción `environment` de `[[inputs.exec]]`; con Docker, con `--env-file`.
 
-Sí, el comportamiento principal está respetado:
+| Variable | Por defecto | Ejemplo |
+| --- | --- | --- |
+| `MONITOREO_LOG_DIR` | `logs/` en la raíz del repo | `/data/logs` |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `WARNING` |
 
-- El logger `telegraf` escribe sólo la línea de métricas.
-- Esta salida no se duplica en `app.log` ni en `errors.log`.
-- Mantiene el formato puro `%(message)s` para que Telegraf capture exactamente la métrica.
+`LOG_LEVEL` controla qué llega al archivo. Un valor inválido se toma como `INFO`.
 
-### Rotación de logs
+> Estas variables **no** se leen del `.env` del repo, porque el `.env` se carga recién al crear el notificador, después de configurar el logging. Esto se unifica en el paso 12 del plan (configuración por variables de entorno).
 
-Se implementó con `RotatingFileHandler`:
+## Cómo escribir logs en el código
 
-- `app.log` y `errors.log` rotan a 10 MB.
-- Se conservan hasta 5 archivos antiguos.
-- Esto evita que se llene el disco.
+```python
+import logging
 
-### Niveles de severidad
+logger = logging.getLogger(__name__)
 
-- `INFO` para eventos normales y de orquestación.
-- `WARNING` / `ERROR` / `CRITICAL` para problemas reales.
-- `DEBUG` se mantiene posible, pero no es el foco principal. Esto coincide con tu observación de que los detalles técnicos no son la prioridad.
+logger.warning("Timeout SNMP en %s (oid=%s)", host, oid)  # bien: formato %s del módulo logging
+logger.exception(
+    "Error al ejecutar StateUPS para %s", host
+)  # dentro de un except: agrega el traceback
 
-## 4. Qué módulos cambiaron y cómo
+logger.warning(f"Timeout SNMP en {host}")  # evitar: f-string
+logger.warning("Timeout SNMP", host=host)  # NO: lanza TypeError (era sintaxis de seqlog)
+```
 
-### `src/main.py`
+Niveles:
 
-- Se inicializa el logger.
-- Se registra el inicio del monitoreo.
-- Se captura y registra un error fatal si el main falla.
+- `INFO`: eventos normales, por ejemplo "Iniciando monitoreo UPS".
+- `WARNING`: problemas esperables y recuperables, como el timeout de un UPS.
+- `ERROR`: fallos que impiden una parte del trabajo, como que no se pueda enviar a Google Chat.
+- `exception`: lo mismo que `ERROR`, pero con el traceback; usarlo dentro de un `except`.
 
-### `src/infraestructura/database.py`
+## Dónde se configura
 
-- Se reemplazó el `print()` por `logger.error()` al fallar la creación de tablas.
+- [src/infraestructura/logger.py](../../src/infraestructura/logger.py): la función `configurar_logger()`.
+- [src/config/configuracion.py](../../src/config/configuracion.py): la carpeta, el nombre del archivo, el tamaño y la cantidad de backups.
+- [src/main.py](../../src/main.py): llama a `configurar_logger()` sólo al ejecutarse como programa, no al importarse.
 
-### `src/infraestructura/snmp_client.py`
+## Historia
 
-- Se registra un `WARNING` ante timeouts SNMP.
-- Se registra un `ERROR` con `exc_info=True` para otros fallos SNMP.
-
-### `src/infraestructura/notificador.py`
-
-- Se reemplazaron los `print()` por `logger.error()`.
-- Se conserva la lógica de notificación, pero con reporte de fallo adecuado.
-
-### `src/drivers/state_ups.py`, `src/drivers/dc_ups.py`, `src/drivers/hum_ups.py`
-
-- Las métricas ahora se envían por `telegraf_logger`.
-- En `StateUPS`, las excepciones se registran con `logger.exception()`.
-
-## 5. Qué no se rompió y qué no era la prioridad
-
-- Las funcionalidades de `DEBUG` y `INFO` se mantuvieron como estaban: el sistema puede seguir usándolas si se agregan mensajes futuros.
-- La mejora principal fue centralizar y profesionalizar el manejo de errores / warnings / críticos.
-- En otras palabras: sí, se respetó la idea de que el valor nuevo está en el reporte de incidentes, no en reescribir todos los `INFO` / `DEBUG`.
-
-## 6. Resultado final esperado
-
-- `logs/app.log`: historial de eventos operativos.
-- `logs/errors.log`: historial de fallos y excepciones.
-- Consola: información útil para monitoreo en vivo.
-- Stdout puro de métricas: captura limpia por Telegraf.
-
-## 7. Archivos agregados
-
-- `logs/.gitignore`
-- `Mejoras.md`
-
----
-
-Si querés, puedo dejar también un checkpoint con ejemplos de líneas que se van a ver en `app.log` y `errors.log`. 
+Antes se usaba `seqlog` para enviar los logs a un servidor Seq en `localhost:5341`. Seq no se usa, así que se eliminó. Además, las llamadas con argumentos propios de seqlog (`host=...`) lanzaban `TypeError` con el logging estándar, y eso hacía que un error ya manejado (por ejemplo, un timeout SNMP) terminara en una excepción nueva.

@@ -1,25 +1,27 @@
 #!/usr/bin/python3
 
+import logging
 import sqlite3
 import threading
-import logging
+
 import config.configuracion as c
+
 
 class RepositorioDB:
     def __init__(self, db_file):
         self.db_file = db_file
         self.lock = threading.Lock()
         self.logger = logging.getLogger(__name__)
-        
+
         # Creación inicial de tablas
         try:
             with sqlite3.connect(self.db_file) as conn:
-                with open(c.ARCHIVO_CREACION_TABLA_STATE, 'r', encoding="utf-8") as sql_script:
+                with open(c.ARCHIVO_CREACION_TABLA_STATE, "r", encoding="utf-8") as sql_script:
                     tabla = sql_script.read()
                 conn.executescript(tabla)
                 conn.commit()
-        except sqlite3.Error as e:
-            self.logger.error("Error al ejecutar el script de creación de tablas", exc_info=True)
+        except sqlite3.Error:
+            self.logger.exception("Error al ejecutar el script de creación de tablas")
 
     def error_activo(self, ups_host, tipo_error):
         """Busca errores activos específicos de un UPS."""
@@ -28,7 +30,7 @@ class RepositorioDB:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT * FROM errores WHERE ups_host=? AND tipo_error=? AND estado_error='activo'",
-                    (ups_host, tipo_error)
+                    (ups_host, tipo_error),
                 )
                 return cursor.fetchone()
 
@@ -39,7 +41,7 @@ class RepositorioDB:
                 cursor = conn.cursor()
                 cursor.execute(
                     "INSERT INTO errores (ups_host, tipo_error, estado_error) VALUES (?, ?, 'activo')",
-                    (ups_host, tipo_error)
+                    (ups_host, tipo_error),
                 )
                 conn.commit()
 
@@ -50,7 +52,7 @@ class RepositorioDB:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT * FROM errores WHERE ups_host=? AND tipo_error=? AND estado_error='resuelto' ORDER BY fecha DESC LIMIT 1",
-                    (ups_host, tipo_error)
+                    (ups_host, tipo_error),
                 )
                 return cursor.fetchone()
 
@@ -61,7 +63,7 @@ class RepositorioDB:
                 cursor = conn.cursor()
                 cursor.execute(
                     "UPDATE errores SET estado_error='activo', fecha=CURRENT_TIMESTAMP WHERE ups_host=? AND tipo_error=? AND estado_error='resuelto'",
-                    (ups_host, tipo_error)
+                    (ups_host, tipo_error),
                 )
                 conn.commit()
 
@@ -72,6 +74,6 @@ class RepositorioDB:
                 cursor = conn.cursor()
                 cursor.execute(
                     "UPDATE errores SET estado_error='resuelto', fecha=CURRENT_TIMESTAMP WHERE ups_host=? AND tipo_error=? AND estado_error='activo'",
-                    (ups_host, tipo_error)
+                    (ups_host, tipo_error),
                 )
                 conn.commit()
