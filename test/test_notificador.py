@@ -53,7 +53,7 @@ def test_envia_un_post_json_con_timeout(monkeypatch, caplog, notificador):
     urlopen = usar_urlopen(monkeypatch)
 
     with caplog.at_level(logging.ERROR):
-        notificador.enviar_mensajes("hola ñandú")
+        assert notificador.enviar_mensajes("hola ñandú") is True
 
     [(pedido, timeout)] = urlopen.pedidos
     assert pedido.full_url == URL
@@ -69,7 +69,7 @@ def test_respuesta_de_error_se_registra(monkeypatch, caplog, notificador):
     usar_urlopen(monkeypatch, excepcion=error)
 
     with caplog.at_level(logging.ERROR):
-        notificador.enviar_mensajes("hola")
+        assert notificador.enviar_mensajes("hola") is False
 
     assert "status=429" in caplog.text
     assert "limite de envio" in caplog.text
@@ -83,7 +83,7 @@ def test_excepcion_al_enviar_se_registra(monkeypatch, caplog, notificador, excep
     usar_urlopen(monkeypatch, excepcion=excepcion)
 
     with caplog.at_level(logging.ERROR):
-        notificador.enviar_mensajes("hola")
+        assert notificador.enviar_mensajes("hola") is False
 
     assert "Excepción al enviar mensaje a Google Chat" in caplog.text
 
@@ -92,7 +92,7 @@ def test_sin_url_se_registra(caplog, notificador):
     notificador.url = None
 
     with caplog.at_level(logging.ERROR):
-        notificador.enviar_mensajes("hola")
+        assert notificador.enviar_mensajes("hola") is False
 
     assert "URL de Google Chat no configurada" in caplog.text
 
@@ -103,7 +103,7 @@ def test_url_que_no_es_https_no_se_usa(monkeypatch, caplog, notificador, url):
     notificador.url = url
 
     with caplog.at_level(logging.ERROR):
-        notificador.enviar_mensajes("hola")
+        assert notificador.enviar_mensajes("hola") is False
 
     assert urlopen.pedidos == []
     assert "debe empezar con https://" in caplog.text

@@ -19,13 +19,20 @@ class ClienteSNMPFalso(ClienteSNMP):
 
 
 class NotificadorFalso:
-    """Guarda los mensajes en lugar de enviarlos a Google Chat."""
+    """
+    Guarda los mensajes en lugar de enviarlos a Google Chat.
+    Con falla=True simula un envio fallido: no guarda el mensaje y devuelve False.
+    """
 
     def __init__(self):
         self.mensajes = []
+        self.falla = False
 
     def enviar_mensajes(self, msg):
+        if self.falla:
+            return False
         self.mensajes.append(msg)
+        return True
 
 
 @pytest.fixture

@@ -139,3 +139,90 @@ def test_si_falla_la_validacion_las_metricas_se_devuelven_igual(caplog, notifica
     assert lineas == [LINEA_OK]
     assert f"Error al validar o notificar {HOST}" in caplog.text
     assert "database is locked" in caplog.text  # el traceback queda en el log
+
+
+# ------------------------------------------------------------------ A8: no perder alertas
+
+
+def test_si_falla_el_envio_no_se_guarda_el_error(caplog, notificador, repo_db):
+    notificador.falla = True
+    respuestas = dict(RESPUESTAS_OK, **{c.OIDCAPACITY: "50"})
+
+    ejecutar(respuestas, notificador, repo_db)
+
+    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is None
+    assert f"No se pudo notificar {HOST} (CARGA_MINIMA)" in caplog.text
+
+
+def test_si_el_error_persiste_se_reenvia_y_recien_ahi_se_guarda(notificador, repo_db):
+    respuestas = dict(RESPUESTAS_OK, **{c.OIDCAPACITY: "50"})
+
+    notificador.falla = True
+    ejecutar(respuestas, notificador, repo_db)  # Google Chat caido: no llega ni se guarda
+    notificador.falla = False
+    ejecutar(respuestas, notificador, repo_db)  # se detecta otra vez y llega
+
+    assert len(notificador.mensajes) == 1
+    assert Errores.CARGA_MINIMA.name in notificador.mensajes[0]
+    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is not None
+
+    ejecutar(respuestas, notificador, repo_db)  # ya avisado: no se repite
+    assert len(notificador.mensajes) == 1
+
+
+def test_si_el_error_se_resuelve_antes_del_reintento_no_se_envia_nada(notificador, repo_db):
+    notificador.falla = True
+    ejecutar(dict(RESPUESTAS_OK, **{c.OIDCAPACITY: "50"}), notificador, repo_db)
+    notificador.falla = False
+    ejecutar(RESPUESTAS_OK, notificador, repo_db)
+
+    assert notificador.mensajes == []
+    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is None
+
+
+def test_si_falla_el_envio_de_la_resolucion_el_error_sigue_activo(notificador, repo_db):
+    repo_db.agregar_error(HOST, Errores.CARGA_MINIMA.name)
+
+    notificador.falla = True
+    ejecutar(RESPUESTAS_OK, notificador, repo_db)
+    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is not None
+
+    notificador.falla = False
+    ejecutar(RESPUESTAS_OK, notificador, repo_db)
+    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is None
+    assert f"[RESUELTO] {Errores.CARGA_MINIMA.name}" in notificador.mensajes[0]
+
+
+def test_varias_alertas_salen_en_un_mensaje_y_se_guardan_todas_o_ninguna(notificador, repo_db):
+    respuestas = dict(RESPUESTAS_OK, **{c.OIDCAPACITY: "50", c.OIDLOAD: "90"})
+    errores = (Errores.CARGA_MINIMA.name, Errores.LOAD_MAXIMO.name)
+
+    notificador.falla = True
+    ejecutar(respuestas, notificador, repo_db)
+    assert all(repo_db.error_activo(HOST, e) is None for e in errores)
+
+    notificador.falla = False
+    ejecutar(respuestas, notificador, repo_db)
+    assert len(notificador.mensajes) == 1
+    assert all(e in notificador.mensajes[0] for e in errores)
+    assert all(repo_db.error_activo(HOST, e) is not None for e in errores)
+
+
+def test_error_resuelto_que_vuelve_reactiva_la_misma_fila(notificador, repo_db):
+    alto = dict(RESPUESTAS_OK, **{c.OIDCAPACITY: "50"})
+    ejecutar(alto, notificador, repo_db)
+    ejecutar(RESPUESTAS_OK, notificador, repo_db)
+    ejecutar(alto, notificador, repo_db)
+
+    with sqlite3.connect(repo_db.db_file) as conn:
+        filas = conn.execute(
+            "SELECT estado_error FROM errores WHERE ups_host=? AND tipo_error=?",
+            (HOST, Errores.CARGA_MINIMA.name),
+        ).fetchall()
+    assert filas == [("activo",)]
+    assert len(notificador.mensajes) == 3
+
+
+def test_notificador_y_repositorio_son_obligatorios():
+    with pytest.raises(TypeError):
+        StateUPS(HOST, ClienteSNMPFalso({}))
