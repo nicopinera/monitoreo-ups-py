@@ -13,6 +13,9 @@ workflow:
 
 .uv:
   image: python:3.10-slim-bookworm
+  # El pipeline programado (semanal) solo corre pip-audit: busca CVEs nuevas sin cambios de codigo
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
   cache:
     key: { files: [uv.lock] }
     paths: [.uv-cache]
@@ -32,7 +35,6 @@ ruff:
 mypy:
   extends: .uv
   stage: calidad
-  allow_failure: true             # no bloquea hasta que agreguemos type hints (B5)
   script:
     - uv run mypy
 
