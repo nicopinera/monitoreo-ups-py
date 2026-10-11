@@ -5,7 +5,6 @@ description = "Monitoreo SNMP de UPS con salida line protocol para Telegraf y al
 requires-python = ">=3.10"
 dependencies = [
     "easysnmp>=0.2.6",
-    "httplib2>=0.32.0",
     "python-dotenv>=1.2.4",
 ]
 
@@ -15,7 +14,6 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.0",
-    "types-httplib2>=0.32.0.20260720",
 ]
 
 [tool.uv]
