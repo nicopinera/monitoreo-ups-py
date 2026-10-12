@@ -1,38 +1,37 @@
-instalacion_requisitos:
-	@echo "Instalando python3";\
-	sudo apt install python3 -y;\
+.PHONY: install run test lint format typecheck audit check docker-build docker-run
 
-	@echo "Instalando pip";\
-	sudo apt install python3-pip -y;\
-	sudo apt install python3-venv -y;\
+install:
+	uv sync
 
-	@echo "Instalando easysnmp y snmp";\
-	sudo apt install snmp -y;\
-	sudo apt install build-essential libsnmp-dev -y;\
-	sudo apt install python3-easysnmp;\
+run:
+	uv run python src/main.py
 
-	@echo "Instalando dotenv";\
-	sudo apt install python3-dotenv;
+test:
+	uv run pytest --cov
 
-	@echo "Instalando httplib2";\
-	sudo apt install python3-httplib2;\
+lint:
+	uv run ruff check .
+	uv run ruff format --check .
+	uvx --from shellcheck-py==0.10.0.1 shellcheck deploy/*.sh
 
-	@echo "Instalando pytest" ;\
-	sudo apt install python3-pytest;\
-	sudo apt install python3-pytest-cov
+format:
+	uv run ruff check --fix .
+	uv run ruff format .
 
-run_hum:
-	@echo "Corriendo monitoreo de humedad..."
-	cd src/;\
-	chmod +x main.py;\
-	./main.py
+typecheck:
+	uv run mypy
 
-run_state:
-	@echo "Corriendo monitoreo de ups..."
-	cd ./src/;\
-	chmod +x main.py;\
-	./main.py
+audit:
+	uv export --frozen --no-dev --no-emit-project --format requirements-txt -o /tmp/req.txt
+	uvx pip-audit --strict --disable-pip --require-hashes -r /tmp/req.txt
 
-install_dependencias_ci:
-	python3 -m venv venv
-	venv/bin/python -m pip install pytest python-dotenv httplib2 easysnmp
+check: lint typecheck test audit   # lo mismo que el CI
+
+# ---------------------------------------------------------------- Docker
+GIT_SHA := $(shell git rev-parse --short=12 HEAD)
+
+docker-build:   # imagen etiquetada con el commit y como :prod (la que usa compose.yaml)
+	docker build --build-arg GIT_SHA=$(GIT_SHA) -t monitoreo-ups:$(GIT_SHA) -t monitoreo-ups:prod .
+
+docker-run:     # una ejecucion, igual que Telegraf (necesita MONITOREO_UID/GID en el .env)
+	docker compose run --rm -T monitoreo

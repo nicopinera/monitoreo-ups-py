@@ -4,3 +4,15 @@ __pycache__/
 venv/
 .coverage
 logs/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage.xml
+report.xml
+requirements.txt
+.uv-cache/
+
+# Carpeta de datos (volumen de Docker): base, logs y estado del deploy. git clean no la toca
+/data/

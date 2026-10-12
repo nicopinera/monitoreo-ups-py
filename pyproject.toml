@@ -1,0 +1,80 @@
+[project]
+name = "monitoreo-ups"
+version = "2.0.0"
+description = "Monitoreo SNMP de UPS con salida line protocol para Telegraf y alertas a Google Chat."
+requires-python = ">=3.13"
+dependencies = [
+    "ezsnmp>=2.4",
+    "python-dotenv>=1.2.4",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+# Un warning (por ejemplo, una conexion sin cerrar) hace fallar el test en lugar de pasar inadvertido
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90   # nunca bajarlo: se sube a medida que crece la cobertura
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "@abstractmethod",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "."]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear: bugs comunes
+    "UP",       # pyupgrade: sintaxis moderna
+    "SIM",      # simplify
+    "N",        # pep8-naming
+    "S",        # bandit: seguridad
+    "PL",       # pylint
+    "PT",       # estilo de pytest
+    "RUF",
+    "LOG",      # buenas practicas de logging
+    "G",        # formato de los mensajes de logging (sin f-strings)
+]
+ignore = [
+    "PLR2004",  # magic values: los umbrales viven en config
+    "N818",     # excepciones terminadas en "Error": en espanol el nombre es ErrorConfiguracion
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]   # assert es la forma de verificar en pytest
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src", "tests"]
+mypy_path = "src"
+explicit_package_bases = true   # src/ no tiene __init__.py
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["ezsnmp.*"]
+ignore_missing_imports = true   # ezsnmp no trae tipos (no tiene py.typed)

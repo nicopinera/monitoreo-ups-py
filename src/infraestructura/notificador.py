@@ -1,37 +1,49 @@
-#!/usr/bin/python3
+import json
+import logging
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
-from dotenv import load_dotenv
-import os, time,logging
-import config.configuracion as c
-from httplib2 import Http
-from json import dumps
 
 class Notificador:
-    def __init__(self,ruta_env):
-        load_dotenv(ruta_env)
-        self.url = os.getenv(c.VAR_PASSWORDCHAT)
+    def __init__(self, url: str | None, timeout: float) -> None:
+        """url: webhook de Google Chat (GOOGLE_CHAT_WEBHOOK_URL). timeout: segundos por envio."""
+        self.url = url
+        self.timeout = timeout
         self.logger = logging.getLogger(__name__)
-    
-    def enviar_mensajes(self,msg):
+
+    def enviar_mensajes(self, msg: str) -> bool:
+        """
+        Envia el mensaje al webhook de Google Chat. Devuelve True si Google Chat lo acepto y
+        False si no se pudo enviar (el motivo queda en el log, la excepcion no se relanza).
+        Usa urllib de la libreria estandar: para un POST con JSON no hace falta otra dependencia.
+        """
         if not self.url:
-            self.logger.error("URL de Google Chat no configurada (PASSWORDCHAT).")
-            return
-            
-        message_headers = {"Content-Type": "application/json; charset=UTF-8"}
-        app_message = {"text": msg}
-        
+            self.logger.error("URL de Google Chat no configurada (GOOGLE_CHAT_WEBHOOK_URL)")
+            return False
+        # urlopen tambien abre file:// y otros esquemas: solo se acepta el webhook por https.
+        # cargar_entorno ya lo valida; se repite aca por si el Notificador se crea de otra forma
+        if not self.url.startswith("https://"):
+            self.logger.error("La URL de Google Chat debe empezar con https://")
+            return False
+
+        pedido = Request(  # noqa: S310 (esquema validado arriba)
+            self.url,
+            data=json.dumps({"text": msg}).encode("utf-8"),
+            headers={"Content-Type": "application/json; charset=UTF-8"},
+            method="POST",
+        )
         try:
-            time.sleep(1)
-            # httplib2.Http() no es thread-safe, se crea uno nuevo por petición o se usa un lock
-            http_obj = Http()
-            response, content = http_obj.request(
-                uri=self.url, 
-                method="POST", 
-                headers=message_headers, 
-                body=dumps(app_message).encode('utf-8')
+            # Sin timeout, un Google Chat que no responde dejaria el hilo esperando para siempre.
+            # S310: el esquema ya se valido arriba (solo https)
+            with urlopen(pedido, timeout=self.timeout):  # noqa: S310
+                return True
+        except HTTPError as e:
+            # urlopen lanza HTTPError para las respuestas 4xx/5xx (por ejemplo 429 por limite)
+            self.logger.error(
+                "Error al enviar mensaje a Google Chat: status=%s respuesta=%s",
+                e.code,
+                e.read().decode("utf-8", errors="replace"),
             )
-            
-            if response.status != 200:
-                self.logger.error("Error al enviar mensaje a Google Chat", status=response.status, contenido=content.decode('utf-8'))
         except Exception:
-            self.logger.error("Excepción al enviar mensaje a Google Chat", exc_info=True)
+            self.logger.exception("Excepción al enviar mensaje a Google Chat")
+        return False
