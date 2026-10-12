@@ -5,6 +5,7 @@ from easysnmp import EasySNMPTimeoutError
 
 import config.configuracion as c
 import infraestructura.snmp_client as modulo_snmp
+from config.entorno import AjustesSNMP
 from infraestructura.snmp_client import ClienteSNMP
 from tests.dobles import ClienteSNMPFalso
 
@@ -130,8 +131,9 @@ def test_la_sesion_usa_timeout_y_reintentos_de_la_configuracion(
     parametros = {}
     monkeypatch.setattr(modulo_snmp, "Session", lambda **kwargs: parametros.update(kwargs))
 
-    ClienteSNMP("ups-test")
+    ClienteSNMP("ups-test", AjustesSNMP(community="secreta", timeout=2.5, retries=3))
 
-    assert parametros["timeout"] == c.SNMP_TIMEOUT
-    assert parametros["retries"] == c.SNMP_RETRIES
+    assert parametros["community"] == "secreta"
+    assert parametros["timeout"] == 2.5
+    assert parametros["retries"] == 3
     assert parametros["hostname"] == "ups-test" + c.SUFIJO
