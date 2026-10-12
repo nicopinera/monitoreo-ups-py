@@ -34,7 +34,12 @@ notificar() {
   # Aviso a Google Chat con el mismo webhook del monitoreo. Si no hay webhook o falla el envio,
   # sigue igual: el aviso es un extra, el registro real es deploy.log.
   local url texto
-  url="$(grep -E '^GOOGLE_CHAT_WEBHOOK_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)"
+  url="$(grep -E '^GOOGLE_CHAT_WEBHOOK_URL=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)"
+  # Comillas alrededor del valor: python-dotenv y compose las quitan, asi que aca tambien
+  url="${url%$'\r'}"
+  if [[ "$url" =~ ^\"(.*)\"$ || "$url" =~ ^\'(.*)\'$ ]]; then
+    url="${BASH_REMATCH[1]}"
+  fi
   [[ -n "$url" ]] || return 0
   texto="${1//\\/\\\\}"
   texto="${texto//\"/\\\"}"
@@ -121,7 +126,7 @@ main() {
   fi
 
   if [[ "$sha_local" == "$sha_remoto" ]]; then
-    log "Reintentando $sha_remoto"
+    log "Construyendo $sha_remoto (no existe su imagen: primer deploy o reintento)"
   else
     log "Actualizando $sha_local -> $sha_remoto"
   fi
