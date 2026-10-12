@@ -226,7 +226,7 @@ Además, si `notificador` es `None` (el valor por defecto del constructor), [sta
 > - **Verificado en real (2026-10-10):** con ~18 avisos simultáneos, Google Chat respondió 429 (`RESOURCE_EXHAUSTED`) a 12; no se guardaron y quedaron pendientes para la ejecución siguiente.
 > - **Garantía "al menos una vez":** puede haber un duplicado si Google Chat recibió el mensaje pero la respuesta se perdió. Se prefiere a perder la alerta.
 > - **Sin URL configurada no se guarda nada:** las alertas quedan pendientes (con un error en el log en cada ejecución) y salen cuando se configura el `.env`.
-> - **Limitaciones aceptadas:** un problema que aparece y se resuelve mientras Google Chat falla no se avisa (para la base nunca cambió); y la `fecha` de la base es la del aviso, no la de la detección, así que la duración que muestre M10 puede quedar un poco corta. Si hace falta no perder ningún evento, el patrón *outbox* (tabla de pendientes) se puede sumar en M5.
+> - **Limitaciones aceptadas:** un problema que aparece y se resuelve mientras Google Chat falla no se avisa (para la base nunca cambió); y la `fecha` de la base es la del aviso, no la de la detección, así que la duración que muestre M10 puede quedar un poco corta. Si hace falta no perder ningún evento, el patrón _outbox_ (tabla de pendientes) se puede sumar en M5.
 > - En lugar del Null Object, `notificador` y `rep_db` pasaron a ser **obligatorios** en `StateUPS`: si faltan, falla al crear el driver y no en medio de una alerta.
 
 ### 2.3 Prioridad media
@@ -292,6 +292,8 @@ Los `StateUPS` corren en 6 hilos y cada uno hace `print()`. En CPython, `print` 
 
 #### M3. El UPS trifásico del DC no tiene alertas
 
+> **Estado: implementado en parte** (paso 19). Por decisión, el DC y el sensor de humedad solo avisan `SIN_RESPUESTA_SNMP`, con el mismo gestor, base y tarjetas que los UPS APC. Para sumarles reglas por umbral alcanza con pasárselas a su driver en `main.py` (ver [arquitectura](arqui/arquitectura_y_uso.md#cómo-extenderlo)).
+
 **Dónde:** [dc_ups.py:41-43](../src/drivers/dc_ups.py#L41-L43)
 
 `DataCenterUPS.validar_datos_y_notificar` es un `pass` y el driver se crea sin notificador ni base de datos. Es, probablemente, el UPS más crítico del datacenter y es el único sin alertas.
@@ -305,6 +307,8 @@ Observaciones menores del mismo archivo:
 - `potencia_w_out` usa un `FP_OUT` fijo de 0,95. Si el equipo expone potencia activa por OID, conviene leerla directamente.
 
 #### M4. El contrato `BaseUPS` no se respeta
+
+> **Estado: implementado** (paso 16). `BaseUPS(hostname, cliente, oids, reglas)`; los drivers implementan `obtener_datos()` y `lineas_telegraf(datos)`, y `ejecutar()` es un método plantilla común que devuelve una `Lectura` (líneas, si hubo datos y chequeos de las reglas). Los drivers ya no usan la base ni el chat: eso lo hace un `GestorAlertas` genérico (`core/gestor_alertas.py`), lo que permitió M3 sin duplicar código. `main` recorre una lista homogénea de drivers.
 
 **Dónde:** [ups_base.py](../src/core/ups_base.py), drivers
 
@@ -334,6 +338,14 @@ class BaseUPS(ABC):
 
 **Dónde:** [database.py](../src/infraestructura/database.py), [schema.sql](../src/infraestructura/schema.sql)
 
+> **Estado: implementado** (paso 15). Decisiones:
+>
+> - **Tabla de incidentes** (`incidentes`): una fila por incidente con `inicio` y `fin` (NULL mientras sigue abierto). Las filas abiertas son el estado actual y las cerradas el historial, con su duración para M10. Un índice único parcial (`WHERE fin IS NULL`) hace que la base garantice un solo incidente abierto por equipo y error. El repositorio quedó en `incidente_abierto`, `abrir_incidente` y `cerrar_incidente`, y el driver en dos acciones (`abrir`/`cerrar`), con una consulta menos por error.
+> - **Base nueva** `data/errores-v2.db` en lugar de migrar la vieja: los errores activos al desplegar se avisan una vez más. `data/errores.db` queda sin uso y se borra a mano.
+> - **`timeout=10`** en las conexiones. **Sin WAL**: con un solo escritor no aporta, y si alguien abre la base como root sus archivos `-wal`/`-shm` pueden quedar de root y el contenedor deja de poder escribir.
+> - **`SIN_RESPUESTA_SNMP` después de N ejecuciones seguidas** (`SNMP_FALLAS_PARA_ALERTA`, 3 por defecto): la cuenta vive en `fallas_consecutivas` (UPSERT) y se reinicia con la primera respuesta, que también resuelve el incidente.
+> - **Zona horaria:** el contenedor corría en UTC y la hora de los mensajes y del log salía 3 h adelantada. La imagen fija `TZ=America/Argentina/Cordoba` (se puede cambiar con `TZ` en el `.env`). La base sigue guardando UTC.
+
 - Por cómo se usa, **nunca hay más de una fila por (host, tipo_error)**: `agregar_error` sólo se llama si no hay ninguna fila, y después `activar_error` y `resolver_error` modifican esa misma fila y pisan `fecha`. En la práctica es una **tabla de estado**, no un historial. Hay que elegir uno de los dos modelos:
   - **Estado:** `UNIQUE(ups_host, tipo_error)` + `INSERT ... ON CONFLICT DO UPDATE`. Las cinco funciones se reducen a `obtener_estado()` y `guardar_estado()`.
   - **Historial:** insertar una fila nueva por cada transición y consultar la última.
@@ -343,6 +355,8 @@ class BaseUPS(ABC):
 - El comentario de [state_ups.py:63](../src/drivers/state_ups.py#L63) dice "Se marca como activo" cuando en realidad se resuelve.
 
 #### M6. Dominio acoplado a la presentación y a strings mágicos
+
+> **Estado: implementado** (paso 17). Reglas declarativas `Regla(metrica, error, condicion, umbral, unidad)` en `REGLAS_UPS` de `configuracion.py`, inyectadas a los drivers; `core/validacion.py` se eliminó. El dominio devuelve `Chequeo`s y `Evento`s sin formato y usa el `Enum` en todos lados (el nombre se guarda en la base). `UIO_ROTO` y `UIO_TEMPERATURA_ALTA` son dos reglas independientes sobre la misma métrica. No se implementaron umbrales por equipo.
 
 **Dónde:** [validacion.py](../src/core/validacion.py), [state_ups.py:70-94](../src/drivers/state_ups.py#L70-L94)
 
@@ -403,6 +417,8 @@ Los `Future` de `executor.submit` se descartan: cualquier excepción que escape 
 > - Python 3.13 avisa (`ResourceWarning`) las conexiones SQLite sin cerrar: `RepositorioDB` ahora las cierra (adelanto de M5), y pytest convierte cualquier warning en error.
 
 #### M10. Mensajes de Google Chat más claros
+
+> **Estado: implementado** (paso 18). Decisiones: tarjetas `cardsV2` con el resumen para el celular en `fallbackText` (con `text`, probado en el espacio de testing, Chat lo mostraba repetido arriba de la tarjeta); **un hilo por incidente** (no por equipo: una alerta nueva en un hilo viejo pasaría desapercibida), con clave equipo + error + inicio, así que cada incidente se avisa en su propio mensaje; botón al dashboard general del datacenter (`GRAFANA_URL`, sin filtro por host); textos legibles con valor, umbral y duración. El formato vive solo en `infraestructura/formato_chat.py`. `make probar-tarjetas WEBHOOK=...` envía ejemplos a un webhook de prueba. Maqueta: https://claude.ai/artifact/WbUBux2ncUuWMT7f1F34gd
 
 **Dónde:** [state_ups.py:96-101](../src/drivers/state_ups.py#L96-L101), [validacion.py](../src/core/validacion.py), [notificador.py](../src/infraestructura/notificador.py)
 
@@ -760,12 +776,12 @@ Si el build o el smoke test fallan, `:prod` sigue apuntando a la imagen anterior
 
 ### 6.2 `deploy/`
 
-| Archivo                                                                    | Se instala en                                  | Qué hace                                                    |
-| -------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------- |
-| [actualizar.sh](../deploy/actualizar.sh)                                   | se ejecuta desde el clon                       | El flujo de §6.1.                                           |
-| [cron-monitoreo-ups](../deploy/cron-monitoreo-ups)                         | `/etc/cron.d/monitoreo-ups`                    | Ejecuta el script cada 5 min como `telegraf`.               |
-| [telegraf-monitoreo-ups.conf](../deploy/telegraf-monitoreo-ups.conf)       | `/etc/telegraf/telegraf.d/monitoreo-ups.conf`  | El `[[inputs.exec]]` con `docker compose run` (§5.4).       |
-| [logrotate-monitoreo-ups](../deploy/logrotate-monitoreo-ups)               | `/etc/logrotate.d/monitoreo-ups`               | Rota `data/logs/deploy.log` cada semana.                    |
+| Archivo                                                              | Se instala en                                 | Qué hace                                              |
+| -------------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------- |
+| [actualizar.sh](../deploy/actualizar.sh)                             | se ejecuta desde el clon                      | El flujo de §6.1.                                     |
+| [cron-monitoreo-ups](../deploy/cron-monitoreo-ups)                   | `/etc/cron.d/monitoreo-ups`                   | Ejecuta el script cada 5 min como `telegraf`.         |
+| [telegraf-monitoreo-ups.conf](../deploy/telegraf-monitoreo-ups.conf) | `/etc/telegraf/telegraf.d/monitoreo-ups.conf` | El `[[inputs.exec]]` con `docker compose run` (§5.4). |
+| [logrotate-monitoreo-ups](../deploy/logrotate-monitoreo-ups)         | `/etc/logrotate.d/monitoreo-ups`              | Rota `data/logs/deploy.log` cada semana.              |
 
 Cambios respecto del script propuesto originalmente, encontrados al probarlo:
 
@@ -842,7 +858,7 @@ Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rá
 - [x] **3. A2:** `try/except` por driver (incluida la creación del cliente SNMP); código de salida 0 si al menos un driver terminó bien.
 - [x] **4. M2 + M8:** los drivers devuelven sus líneas y `main` las imprime desde el hilo principal. La lectura del resultado de cada future ya quedó hecha en A2. Toca el mismo flujo que A2, por eso va justo después.
 - [x] **5. A5:** `timeout`/`retries` en SNMP, cortar el host tras el primer timeout, timeout HTTP (con `urllib.request` en lugar de httplib2), quitar `time.sleep(1)` y `max_workers` configurable.
-  - [X] Bajar el `timeout` de Telegraf en la VM a `30s` después de desplegar.
+  - [x] Bajar el `timeout` de Telegraf en la VM a `30s` después de desplegar.
 - [x] **6. A8:** persistir el cambio de estado sólo si el envío fue exitoso; `notificador` y `rep_db` obligatorios en `StateUPS` en lugar del notificador nulo.
 
 ### Etapa 2 — Herramientas
@@ -856,7 +872,7 @@ Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rá
 - [x] **8. uv:** `pyproject.toml` (§3.3), `uv.lock`, `.python-version` (3.10, ver M9); borrar `pytest.ini`.
 - [x] **9. Formato:** `ruff check --fix` + `ruff format` en un MR que **sólo** cambie formato, para que los refactors posteriores tengan diffs limpios. Con las reglas mínimas de §3.3; el resto se suma en el paso 11.
 - [x] **10. A7 — CI:** nuevo `.gitlab-ci.yml` (§4.2) con ruff, pytest + cobertura y pip-audit bloqueantes; mypy con `allow_failure: true` hasta el paso 11.
-  - [X] Configuración de GitLab (§4.1): proteger `main`, activar "Pipelines must succeed" y programar el pipeline semanal.
+  - [x] Configuración de GitLab (§4.1): proteger `main`, activar "Pipelines must succeed" y programar el pipeline semanal.
 - [x] **11. B5:** type hints en todo `src/` y `tests/`; mypy `strict` bloqueante en el CI; todas las reglas de ruff de §3.3; `fail_under = 90`. Cambios de código que trajo:
   - `clienteSNMP` → `cliente_snmp` (convención de nombres, regla `N803`).
   - `BaseUPS.obtener_datos/ejecutar` declaran `*args: Any, **kwargs: Any` para que mypy acepte que cada driver tenga sus parámetros. Es provisorio hasta M4.
@@ -867,41 +883,47 @@ Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rá
 ### Etapa 3 — Despliegue automático
 
 - [x] **12. A6 + M7:** base y logs en `data/` (`data/logs/`), `.env` en formato `CLAVE=valor`, comunidad SNMP, webhook (renombrado a `GOOGLE_CHAT_WEBHOOK_URL`), timeouts y nivel de log por variables de entorno.
-  - [X] **Antes de desplegar**, en el `.env` de la VM: agregar `SNMP_COMMUNITY=<la comunidad actual>` (sin ella no arranca), renombrar `PASSWORDCHAT` → `GOOGLE_CHAT_WEBHOOK_URL`, sacar comillas y espacios. Probar a mano con `python3 src/main.py >/dev/null; echo $?` antes de que lo corra Telegraf.
-  - [X] Después de desplegar: los logs nuevos van a `data/logs/`; mover o borrar la carpeta `logs/` vieja.
+  - [x] **Antes de desplegar**, en el `.env` de la VM: agregar `SNMP_COMMUNITY=<la comunidad actual>` (sin ella no arranca), renombrar `PASSWORDCHAT` → `GOOGLE_CHAT_WEBHOOK_URL`, sacar comillas y espacios. Probar a mano con `python3 src/main.py >/dev/null; echo $?` antes de que lo corra Telegraf.
+  - [x] Después de desplegar: los logs nuevos van a `data/logs/`; mover o borrar la carpeta `logs/` vieja.
 - [x] **13. Docker:**
   - [x] `Dockerfile`, `.dockerignore` (lista de permitidos) y `compose.yaml`. `make docker-build` / `make docker-run`.
   - [x] Migrar a `ezsnmp` y **Python 3.13** (M9), verificado contra el UPS del DC.
   - [x] Job `docker-build` en el CI.
   - [x] `MONITOREO_UID`/`MONITOREO_GID` en el `.env.example` (los usa compose).
-  - [X] Instalar compose y buildx en la VM (§5.4) y probar la imagen **en paralelo** al esquema actual, sin tocarlo: clonar en otra carpeta, `.env` con `GOOGLE_CHAT_WEBHOOK_URL` vacío y `MONITOREO_DATA_DIR` propio, `make docker-build` y comparar con `diff` la salida de `docker compose run --rm -T monitoreo` contra la de `python3 src/main.py` del clon actual. Lo importante: los 28 equipos con los mismos campos, incluidos los de firmware viejo (`OIDTNEW`).
-- [ ] **14. Deploy:** en el repo está hecho; falta la VM, siguiendo el [runbook](runbook_vm.md) (anexo de migración).
+  - [x] Instalar compose y buildx en la VM (§5.4) y probar la imagen **en paralelo** al esquema actual, sin tocarlo: clonar en otra carpeta, `.env` con `GOOGLE_CHAT_WEBHOOK_URL` vacío y `MONITOREO_DATA_DIR` propio, `make docker-build` y comparar con `diff` la salida de `docker compose run --rm -T monitoreo` contra la de `python3 src/main.py` del clon actual. Lo importante: los 28 equipos con los mismos campos, incluidos los de firmware viejo (`OIDTNEW`).
+- [ ] **14. Deploy:** en producción desde el 12/10/2026; falta probar un rollback.
   - [x] `deploy/actualizar.sh`, cron, input de Telegraf y logrotate (§6.2), probados con un remoto local: deploy, sin cambios, fallo de smoke test, `FORCE=1`, fallo de fetch y limpieza de imágenes.
   - [x] `/data/` en `.gitignore`; `shellcheck` en el CI y en `make lint`.
-  - [ ] VM: deploy key, clon nuevo en paralelo (`/etc/telegraf/monitoreo-ups.nuevo`), `.env` con `MONITOREO_UID`/`MONITOREO_GID`, primer deploy y comparación con la salida actual.
-  - [ ] VM: corte (intercambiar carpetas, copiar `errores.db`, cambiar el input de Telegraf), cron y logrotate.
-  - [ ] Comprobar que un cambio trivial en `main` se despliega solo.
-  - [ ] Probar un rollback.
+  - [x] Job `docker-build` del CI funcionando en el runner compartido, con dind sin TLS (el runner no comparte `/certs/client`).
+  - [x] VM: actualización en el lugar del clon existente (en lugar del clon en paralelo del anexo A del runbook): `git restore` + `git pull`, limpieza de restos (`.venv`, `logs/`, módulos viejos), dueño `telegraf` y `750`, deploy key, `.env` con `MONITOREO_UID`/`MONITOREO_GID`, primer deploy, input de Telegraf con `docker compose run`, cron y logrotate.
+  - [x] Un cambio en `main` se desplegó solo (el arreglo de la autonomía, abajo).
+  - [ ] Probar un rollback (runbook §10.2).
+
+  Problemas encontrados en la puesta en marcha, ya corregidos:
+  - **Autonomía de los APC sin dato:** su OID es TimeTicks y ezsnmp, a diferencia de easysnmp, los devuelve como texto (`(123400) 0:20:34.00`), así que no se podían convertir a número; tampoco se validaba la alerta `AUTONOMIA_MINIMO`. La sesión se crea con `print_timeticks_numerically=True`. La migración (M9) se había verificado sólo contra el UPS del DC, cuya autonomía es `INTEGER`.
+  - **Aviso del deploy no enviado:** el `.env` de la VM tenía el webhook entre comillas; python-dotenv y compose las quitan, pero el script lo leía con `grep`/`cut`. Ahora el script también las quita.
 
   A partir de acá, cada MR mergeado llega solo a la VM.
 
 ### Etapa 4 — Mejoras de dominio
 
-- [ ] **15. M5:** decidir si la tabla guarda estado o historial; `UNIQUE`/UPSERT, índice, WAL, cierre de conexiones. Opcional: exigir varias fallas seguidas antes de avisar `SIN_RESPUESTA_SNMP`. Va antes que M10 porque la duración de los incidentes sale de esta tabla.
-- [ ] **16. M4:** `BaseUPS` homogéneo, con OIDs inyectados y `ejecutar()` sin argumentos.
-- [ ] **17. M6:** reglas de validación declarativas con umbrales inyectados; el dominio devuelve objetos `Alerta` sin formato; usar el `Enum` en lugar de strings.
-- [ ] **18. M10:** `FormateadorGoogleChat` con tarjetas, umbral, duración, botón a Grafana e hilos por equipo.
-- [ ] **19. M3:** alertas para el UPS trifásico del DC, reutilizando las reglas (M6) y el formateador (M10). Incluye el aviso `SIN_RESPUESTA_SNMP` para el DC.
-- [ ] **20. B8:** reescribir el README y actualizar `docs/arqui/` y `docs/logger/`.
+- [x] **15. M5:** tabla de incidentes en `errores-v2.db`, `timeout` sin WAL, `SIN_RESPUESTA_SNMP` después de N fallas seguidas y zona horaria del contenedor (ver [M5](#m5-modelo-de-datos-de-sqlite)). Va antes que M10 porque la duración de los incidentes sale de esta tabla.
+  - [ ] Después de desplegar: borrar `data/errores.db` en la VM.
+- [x] **16. M4:** `BaseUPS` homogéneo, con OIDs inyectados y `ejecutar()` sin argumentos; las alertas pasan a un `GestorAlertas` genérico.
+- [x] **17. M6:** reglas de validación declarativas con umbrales inyectados; el dominio devuelve eventos sin formato; el `Enum` en lugar de strings.
+- [x] **18. M10:** tarjetas con umbral, duración y botón a Grafana; hilos por incidente.
+  - [ ] Probar con el webhook de prueba antes de desplegar: `make probar-tarjetas WEBHOOK='...'`.
+- [x] **19. M3 (parcial):** `SIN_RESPUESTA_SNMP` para el UPS trifásico del DC y para el sensor de humedad. Sin alertas por umbral, por decisión.
+- [x] **20. B8:** README reescrito, `docs/arqui/arquitectura_y_uso.md` actualizado, `docs/logger/` unificado en `docs/logging.md`, `docs/conceptos.md` (vacío) eliminado y `docs/monitoreo-ups.md` (página de BookStack).
 
 ---
 
 ## 8. Preguntas abiertas
 
 1. ~~¿Cuál es el `interval` y el `timeout` actual del `[[inputs.exec]]` en Telegraf?~~ Respondida: `interval = "60s"`, `timeout = "60s"` (A5).
-2. ¿El runner de GitLab permite Docker-in-Docker (modo privilegiado)? Define si `docker-build` corre en el CI (§4.2).
+2. ~~¿El runner de GitLab permite Docker-in-Docker (modo privilegiado)?~~ Respondida: sí, con dind sin TLS (`--tls=false`, `DOCKER_HOST=tcp://docker:2375`), porque el runner compartido no comparte `/certs/client` (§4.2).
 3. ¿La VM tiene salida directa a Docker Hub, ghcr.io y PyPI, o sale por un proxy? (§6.4)
-4. ¿La tabla `errores` se quiere como estado actual o como historial de incidentes? (M5)
-5. ¿Qué umbrales corresponden al UPS trifásico del DC? (M3)
+4. ~~¿La tabla `errores` se quiere como estado actual o como historial de incidentes?~~ Respondida: tabla de incidentes, que sirve para las dos cosas (M5).
+5. ~~¿Qué umbrales corresponden al UPS trifásico del DC?~~ Por ahora no lleva alertas por umbral, solo `SIN_RESPUESTA_SNMP` (M3).
 6. ¿Algún UPS tiene firmware viejo que use `OIDTNEW`? Sirve para probar A4 contra un equipo real.
-7. ¿Qué URL tiene el dashboard de Grafana de los UPS, y con qué variable filtra por host? (M10)
+7. ~~¿Qué URL tiene el dashboard de Grafana de los UPS?~~ Respondida: `https://grafana.srv.unc.edu.ar/d/26SryAYmz/datacenter`; el botón abre el dashboard general, sin filtrar por host (M10).

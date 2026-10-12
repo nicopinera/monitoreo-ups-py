@@ -7,6 +7,8 @@ from functools import partial
 
 import config.configuracion as c
 from config.entorno import AjustesSNMP, Entorno, ErrorConfiguracion, cargar_entorno
+from core.gestor_alertas import GestorAlertas
+from core.ups_base import BaseUPS
 from drivers.dc_ups import DataCenterUPS
 from drivers.hum_ups import HumedadUPS
 from drivers.state_ups import StateUPS
@@ -23,41 +25,56 @@ Tarea = tuple[str, Callable[[], list[str]]]
 ResultadoTarea = list[str] | None
 
 
-def _tarea_humedad(ajustes_snmp: AjustesSNMP) -> list[str]:
+def _humedad(ajustes_snmp: AjustesSNMP) -> BaseUPS:
     cliente = ClienteSNMP(c.HOST_NAME_HUMEDAD, ajustes_snmp)
-    return HumedadUPS(hostname=c.HOST_NAME_HUMEDAD, cliente_snmp=cliente).ejecutar(c.OID_HUMEDAD)
+    return HumedadUPS(c.HOST_NAME_HUMEDAD, cliente, {"humidity": c.OID_HUMEDAD})
 
 
-def _tarea_dc(ajustes_snmp: AjustesSNMP) -> list[str]:
-    cliente = ClienteSNMP(c.HOST_NAME_DC, ajustes_snmp)
-    return DataCenterUPS(c.HOST_NAME_DC, cliente_snmp=cliente).ejecutar(c.OID_DC)
+def _dc(ajustes_snmp: AjustesSNMP) -> BaseUPS:
+    return DataCenterUPS(c.HOST_NAME_DC, ClienteSNMP(c.HOST_NAME_DC, ajustes_snmp), c.OID_DC)
 
 
-def _tarea_state(
-    host: str, ajustes_snmp: AjustesSNMP, notificador: Notificador, repo_db: RepositorioDB
-) -> list[str]:
+def _state(host: str, ajustes_snmp: AjustesSNMP) -> BaseUPS:
     cliente = ClienteSNMP(host, ajustes_snmp)
-    driver = StateUPS(hostname=host, cliente_snmp=cliente, notificador=notificador, rep_db=repo_db)
-    return driver.ejecutar(c.OID_UPS, c.OIDT, c.OIDTNEW)
+    return StateUPS(host, cliente, c.OID_UPS, (c.OIDT, c.OIDTNEW), c.REGLAS_UPS)
 
 
-def crear_tareas(
-    ajustes_snmp: AjustesSNMP, notificador: Notificador, repo_db: RepositorioDB
-) -> list[Tarea]:
+def crear_drivers(ajustes_snmp: AjustesSNMP) -> list[tuple[str, Callable[[], BaseUPS]]]:
     """
-    Arma las tareas a ejecutar como una lista de (nombre, funcion).
-    Cada tarea crea su propio cliente SNMP, asi un host que falla al crear la sesion
-    (por ejemplo un nombre que no resuelve DNS) solo afecta a ese host.
+    Los equipos a monitorear, como (nombre para el log, funcion que crea su driver).
+    El driver (y su cliente SNMP) se crea dentro de la tarea: un host que falla al crear la
+    sesion (por ejemplo un nombre que no resuelve DNS) solo afecta a ese host.
     """
-    tareas: list[Tarea] = [
-        (f"humedad {c.HOST_NAME_HUMEDAD}", partial(_tarea_humedad, ajustes_snmp)),
-        (f"DC {c.HOST_NAME_DC}", partial(_tarea_dc, ajustes_snmp)),
+    drivers: list[tuple[str, Callable[[], BaseUPS]]] = [
+        (f"humedad {c.HOST_NAME_HUMEDAD}", partial(_humedad, ajustes_snmp)),
+        (f"DC {c.HOST_NAME_DC}", partial(_dc, ajustes_snmp)),
     ]
-    tareas += [
-        (f"state {host}", partial(_tarea_state, host, ajustes_snmp, notificador, repo_db))
-        for host in c.HOST_NAME_STATE
+    drivers += [
+        (f"state {host}", partial(_state, host, ajustes_snmp)) for host in c.HOST_NAME_STATE
     ]
-    return tareas
+    return drivers
+
+
+def _monitorear(crear_driver: Callable[[], BaseUPS], gestor: GestorAlertas) -> list[str]:
+    """
+    Lee un equipo, procesa sus alertas y devuelve sus lineas de Telegraf. Todos los drivers se
+    usan igual (M4). Un error al leer se propaga (lo registra _ejecutar_protegido); un error en
+    las alertas (base, Google Chat) se registra aca y las metricas se devuelven igual.
+    """
+    lectura = crear_driver().ejecutar()
+    try:
+        gestor.procesar(lectura)
+    except Exception:
+        logger.exception("Error al validar o notificar %s", lectura.equipo.clave)
+    return lectura.lineas
+
+
+def crear_tareas(ajustes_snmp: AjustesSNMP, gestor: GestorAlertas) -> list[Tarea]:
+    """Una tarea por equipo, como (nombre para el log, funcion sin argumentos)."""
+    return [
+        (nombre, partial(_monitorear, crear_driver, gestor))
+        for nombre, crear_driver in crear_drivers(ajustes_snmp)
+    ]
 
 
 def _ejecutar_protegido(nombre: str, tarea: Callable[[], list[str]]) -> ResultadoTarea:
@@ -105,10 +122,11 @@ def main(entorno: Entorno) -> int:
     logger.info("Iniciando monitoreo UPS")
 
     # Infraestructura compartida: si falla es un error fatal (configuracion local rota)
-    notificador = Notificador(entorno.webhook_url, entorno.http_timeout)
+    notificador = Notificador(entorno.webhook_url, entorno.http_timeout, entorno.grafana_url)
     repo_db = RepositorioDB(entorno.archivo_db)
+    gestor = GestorAlertas(repo_db, notificador, entorno.fallas_para_alerta)
 
-    tareas = crear_tareas(entorno.snmp, notificador, repo_db)
+    tareas = crear_tareas(entorno.snmp, gestor)
     resultados = ejecutar_tareas(tareas, entorno.max_workers)
 
     lineas = [linea for resultado in resultados if resultado for linea in resultado]

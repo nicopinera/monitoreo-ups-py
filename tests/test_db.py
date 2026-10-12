@@ -1,99 +1,134 @@
 import sqlite3
 from contextlib import closing
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from infraestructura.database import RepositorioDB
 
-
-@pytest.fixture
-def db_repo(tmp_path: Path) -> RepositorioDB:
-    # Creamos una base de datos temporal para cada test
-    db_file = tmp_path / "test_errores.db"
-    # El RepositorioDB usará el script SQL real definido en la configuración
-    repo = RepositorioDB(str(db_file))
-    return repo
+HOST = "ups-test"
+ERROR = "CARGA_MINIMA"
+INICIO = datetime(2026, 10, 12, 20, 21, 5, tzinfo=UTC)
+FIN = INICIO + timedelta(hours=2)
 
 
-def test_creacion_tablas(db_repo: RepositorioDB) -> None:
-    """Verifica que las tablas se creen correctamente al inicializar."""
-    with closing(sqlite3.connect(db_repo.db_file)) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='errores'")
-        assert cursor.fetchone() is not None
+def filas(repo: RepositorioDB, sql: str) -> list[tuple[object, ...]]:
+    with closing(sqlite3.connect(repo.db_file)) as conn:
+        return conn.execute(sql).fetchall()
 
 
-def test_agregar_y_consultar_error_activo(db_repo: RepositorioDB) -> None:
-    """Prueba que un error se agregue y se pueda encontrar como activo."""
-    host = "ups-test"
-    error = "BATERIA_BAJA"
-
-    db_repo.agregar_error(host, error)
-    resultado = db_repo.error_activo(host, error)
-
-    assert resultado is not None
-    assert resultado[1] == host  # ups_host
-    assert resultado[2] == error  # tipo_error
-    assert resultado[3] == "activo"  # estado_error
+def test_crea_las_tablas(repo_db: RepositorioDB) -> None:
+    tablas = filas(repo_db, "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    assert tablas == [("fallas_consecutivas",), ("incidentes",)]
 
 
-def test_resolver_error(db_repo: RepositorioDB) -> None:
-    """Prueba que un error activo pase a estado resuelto."""
-    host = "ups-test"
-    error = "SOBRECARGA"
-
-    db_repo.agregar_error(host, error)
-    db_repo.resolver_error(host, error)
-
-    # No debe haber error activo
-    assert db_repo.error_activo(host, error) is None
-
-    # Debe aparecer como resuelto
-    resuelto = db_repo.error_resuelto(host, error)
-    assert resuelto is not None
-    assert resuelto[3] == "resuelto"
-
-
-def test_activar_error_resuelto(db_repo: RepositorioDB) -> None:
-    """Prueba que un error resuelto pueda volver a activarse."""
-    host = "ups-test"
-    error = "TEMPERATURA"
-
-    # 1. Creamos y resolvemos
-    db_repo.agregar_error(host, error)
-    db_repo.resolver_error(host, error)
-    assert db_repo.error_activo(host, error) is None
-
-    # 2. Reactivamos
-    db_repo.activar_error(host, error)
-
-    # 3. Debe volver a estar activo
-    activo = db_repo.error_activo(host, error)
-    assert activo is not None
-    assert activo[3] == "activo"
-
-
-def test_historial_errores(db_repo: RepositorioDB) -> None:
-    """Verifica que el sistema distinga entre errores de diferentes hosts."""
-    db_repo.agregar_error("UPS-A", "ERROR_1")
-    db_repo.agregar_error("UPS-B", "ERROR_1")
-
-    assert db_repo.error_activo("UPS-A", "ERROR_1") is not None
-    assert db_repo.error_activo("UPS-B", "ERROR_1") is not None
-
-    db_repo.resolver_error("UPS-A", "ERROR_1")
-
-    assert db_repo.error_activo("UPS-A", "ERROR_1") is None
-    assert db_repo.error_activo("UPS-B", "ERROR_1") is not None
+def test_crear_el_repositorio_dos_veces_no_falla(repo_db: RepositorioDB) -> None:
+    # El esquema se ejecuta en cada arranque sobre la misma base
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+    otro = RepositorioDB(repo_db.db_file)
+    assert otro.incidente_abierto(HOST, ERROR) is not None
 
 
 def test_crea_la_carpeta_de_la_base_si_no_existe(tmp_path: Path) -> None:
     # data/ no esta en git: en un clon nuevo no existe
-    db_file = tmp_path / "data" / "errores.db"
+    db_file = tmp_path / "data" / "errores-v2.db"
 
     repo = RepositorioDB(str(db_file))
-    repo.agregar_error("ups-test", "CARGA_MINIMA")
+    repo.abrir_incidente(HOST, ERROR, INICIO)
 
     assert db_file.exists()
-    assert repo.error_activo("ups-test", "CARGA_MINIMA") is not None
+    assert repo.incidente_abierto(HOST, ERROR) is not None
+
+
+# ------------------------------------------------------------------ incidentes
+
+
+def test_sin_incidentes_no_hay_ninguno_abierto(repo_db: RepositorioDB) -> None:
+    assert repo_db.incidente_abierto(HOST, ERROR) is None
+
+
+def test_abrir_incidente_guarda_el_inicio_en_utc(repo_db: RepositorioDB) -> None:
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+
+    incidente = repo_db.incidente_abierto(HOST, ERROR)
+    assert incidente is not None
+    assert (incidente.ups_host, incidente.tipo_error) == (HOST, ERROR)
+    # El inicio vuelve igual, con zona UTC: identifica el hilo del incidente en el chat
+    assert incidente.inicio == INICIO
+    assert filas(repo_db, "SELECT inicio FROM incidentes") == [("2026-10-12 20:21:05",)]
+
+
+def test_una_fecha_con_otra_zona_se_guarda_en_utc(repo_db: RepositorioDB) -> None:
+    hora_local = INICIO.astimezone(timezone(timedelta(hours=-3)))
+    repo_db.abrir_incidente(HOST, ERROR, hora_local)
+    assert filas(repo_db, "SELECT inicio FROM incidentes") == [("2026-10-12 20:21:05",)]
+
+
+def test_abrir_dos_veces_no_duplica(repo_db: RepositorioDB) -> None:
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+
+    assert filas(repo_db, "SELECT COUNT(*) FROM incidentes") == [(1,)]
+
+
+def test_la_base_impide_dos_incidentes_abiertos_del_mismo_error(repo_db: RepositorioDB) -> None:
+    # La regla la garantiza el indice unico parcial, no solo el codigo
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+    with closing(sqlite3.connect(repo_db.db_file)) as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO incidentes (ups_host, tipo_error) VALUES (?, ?)", (HOST, ERROR))
+
+
+def test_cerrar_incidente_guarda_el_fin(repo_db: RepositorioDB) -> None:
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+    repo_db.cerrar_incidente(HOST, ERROR, FIN)
+
+    assert repo_db.incidente_abierto(HOST, ERROR) is None
+    assert filas(repo_db, "SELECT fin FROM incidentes") == [("2026-10-12 22:21:05",)]
+
+
+def test_cerrar_sin_incidente_abierto_no_hace_nada(repo_db: RepositorioDB) -> None:
+    repo_db.cerrar_incidente(HOST, ERROR, FIN)
+    assert filas(repo_db, "SELECT COUNT(*) FROM incidentes") == [(0,)]
+
+
+def test_cada_aparicion_es_un_incidente_nuevo(repo_db: RepositorioDB) -> None:
+    # El historial queda: los cerrados no se reutilizan ni se pisan
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+    repo_db.cerrar_incidente(HOST, ERROR, FIN)
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+
+    estados = filas(repo_db, "SELECT fin IS NULL FROM incidentes ORDER BY id")
+    assert estados == [(0,), (1,)]  # el primero cerrado, el segundo abierto
+
+
+def test_incidentes_de_distintos_equipos_y_errores_son_independientes(
+    repo_db: RepositorioDB,
+) -> None:
+    repo_db.abrir_incidente("UPS-A", ERROR, INICIO)
+    repo_db.abrir_incidente("UPS-B", ERROR, INICIO)
+    repo_db.abrir_incidente("UPS-A", "LOAD_MAXIMO", INICIO)
+
+    repo_db.cerrar_incidente("UPS-A", ERROR, FIN)
+
+    assert repo_db.incidente_abierto("UPS-A", ERROR) is None
+    assert repo_db.incidente_abierto("UPS-B", ERROR) is not None
+    assert repo_db.incidente_abierto("UPS-A", "LOAD_MAXIMO") is not None
+
+
+# ------------------------------------------------------------------ fallas consecutivas
+
+
+def test_sumar_falla_cuenta_las_ejecuciones_seguidas(repo_db: RepositorioDB) -> None:
+    assert [repo_db.sumar_falla(HOST, ERROR) for _ in range(3)] == [1, 2, 3]
+    assert repo_db.sumar_falla("otro-ups", ERROR) == 1
+
+
+def test_reiniciar_fallas_vuelve_a_empezar(repo_db: RepositorioDB) -> None:
+    repo_db.sumar_falla(HOST, ERROR)
+    repo_db.sumar_falla(HOST, ERROR)
+
+    repo_db.reiniciar_fallas(HOST, ERROR)
+
+    assert filas(repo_db, "SELECT COUNT(*) FROM fallas_consecutivas") == [(0,)]
+    assert repo_db.sumar_falla(HOST, ERROR) == 1

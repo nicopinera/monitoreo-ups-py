@@ -6,9 +6,7 @@ from ezsnmp import exceptions as errores_snmp
 
 import config.configuracion as c
 from config.entorno import AjustesSNMP
-
-# Valor numerico de un OID; None si no hubo respuesta o no es un numero valido
-Numero = int | float
+from core.alertas import Numero  # valor de un OID; None si no hubo respuesta o no es numerico
 
 # Tipos que devuelve ezsnmp (SNMPv2c) cuando el OID no existe en el equipo
 TIPOS_SIN_DATO = ("NOSUCHOBJECT", "NOSUCHINSTANCE", "ENDOFMIBVIEW")

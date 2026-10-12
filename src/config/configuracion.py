@@ -5,6 +5,9 @@ Los secretos, rutas, timeouts y nivel de log vienen del entorno (ver config/ento
 
 import os
 
+from core.alertas import Regla
+from core.errores import Errores
+
 # Depende de como estan configurados los UPS, no de donde corre el monitoreo
 VERSION_SNMP = 1
 
@@ -110,11 +113,18 @@ OID_UPS = {
 
 OID_HUMEDAD = "1.3.6.1.4.1.318.1.1.25.1.2.1.7.2.1"
 
-VALOR_TEMP_BAT_MAX = 28
-VALOR_TEMP_UIO_MAX = 28
-VALOR_CARGA_MIN = 70
-VALOR_LOAD_MAX = 60
-VALOR_AUTONOMIA_MIN = 9.0
+# Reglas de alerta de los UPS APC (StateUPS). Una regla por error: alerta cuando la metrica
+# supera el umbral ("max": valor > umbral, "min": valor < umbral). Para cambiar un umbral se
+# cambia aca y se hace un MR: el deploy automatico lo lleva a la VM.
+REGLAS_UPS = (
+    Regla("battery", Errores.TEMPERATURA_BATERIA_ALTA, "max", 28, "°C"),
+    # Un sensor desconectado o roto informa valores negativos
+    Regla("temp", Errores.UIO_ROTO, "min", 0, "°C"),
+    Regla("temp", Errores.UIO_TEMPERATURA_ALTA, "max", 28, "°C"),
+    Regla("capacity", Errores.CARGA_MINIMA, "min", 70, "%"),
+    Regla("load", Errores.LOAD_MAXIMO, "max", 60, "%"),
+    Regla("life", Errores.AUTONOMIA_MINIMO, "min", 9, "min"),
+)
 
 RUTA_RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 ARCHIVO_ENV = os.path.join(RUTA_RAIZ, ".env")

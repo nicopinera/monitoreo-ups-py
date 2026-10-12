@@ -24,7 +24,7 @@ RESPUESTAS_OK = {
 
 
 def ejecutar(respuestas: dict[str, str]) -> list[str]:
-    return DataCenterUPS(HOST, ClienteSNMPFalso(respuestas)).ejecutar(c.OID_DC)
+    return DataCenterUPS(HOST, ClienteSNMPFalso(respuestas), c.OID_DC).ejecutar().lineas
 
 
 def test_todos_los_datos_devuelve_todas_las_lineas_sin_imprimir(
@@ -70,3 +70,11 @@ def test_valor_no_numerico_no_aborta() -> None:
 
 def test_sin_respuesta_no_devuelve_lineas() -> None:
     assert ejecutar({}) == []
+
+
+def test_sin_respuesta_lo_informa_para_alertar_y_no_tiene_otras_reglas() -> None:
+    driver = DataCenterUPS(HOST, ClienteSNMPFalso({}), c.OID_DC)
+    lectura = driver.ejecutar()
+    assert lectura.hay_datos is False
+    assert lectura.equipo.tipo == "UPS trifásico DC"
+    assert DataCenterUPS(HOST, ClienteSNMPFalso(RESPUESTAS_OK), c.OID_DC).ejecutar().chequeos == []
