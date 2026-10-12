@@ -1,0 +1,10 @@
+# Deploy automatico del monitoreo de UPS. Se instala como /etc/cron.d/monitoreo-ups
+# (ver docs/runbook_vm.md). No se actualiza con el deploy: si cambia, volver a copiarlo.
+#
+# Formato de /etc/cron.d: minuto hora dia mes dia_semana USUARIO comando
+# Para pausar el deploy automatico, comentar la ultima linea.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+*/5 * * * * telegraf /etc/telegraf/monitoreo-ups/deploy/actualizar.sh >> /etc/telegraf/monitoreo-ups/data/logs/deploy.log 2>&1
