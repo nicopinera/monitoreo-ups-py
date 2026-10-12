@@ -69,7 +69,7 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.13"
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 mypy_path = "src"
 explicit_package_bases = true   # src/ no tiene __init__.py
 strict = true

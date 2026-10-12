@@ -1,20 +1,20 @@
+from core.alertas import Datos, Equipo
 from core.ups_base import BaseUPS
 
 
 class HumedadUPS(BaseUPS):
-    def obtener_datos(self, oid_hum: str) -> None:
-        """Cada driver debe saber que OID pedir"""
-        self.datos["humidity"] = self.cliente_snmp.obtener_valor_numerico(oid_hum)
+    """Sensor de humedad conectado a un UPS. Solo alerta si no responde (SIN_RESPUESTA_SNMP)."""
 
-    def validar_datos_y_notificar(self) -> None:
-        """El sensor de humedad no tiene alertas por ahora"""
+    TIPO = "Sensor de humedad"
 
-    def lineas_telegraf(self) -> list[str]:
-        """Si no hay dato de humedad no hay linea"""
-        campos = self._formatear_campos(("humidity",))
-        return [f"ups_temp2,host={self.hostname} {campos}"] if campos else []
+    @property
+    def equipo(self) -> Equipo:
+        # El sensor vive en un UPS que tambien tiene su propio driver: con otra clave sus
+        # incidentes y sus hilos no se mezclan con los del UPS
+        return Equipo(hostname=self.hostname, tipo=self.TIPO, clave=f"{self.hostname}-humedad")
 
-    def ejecutar(self, oid_hum: str) -> list[str]:
-        self.obtener_datos(oid_hum)
-        self.validar_datos_y_notificar()
-        return self.lineas_telegraf()
+    def obtener_datos(self) -> Datos:
+        return self._leer_oids()
+
+    def lineas_telegraf(self, datos: Datos) -> list[str]:
+        return [f"ups_temp2,host={self.hostname} {self._formatear_campos(datos, ('humidity',))}"]
