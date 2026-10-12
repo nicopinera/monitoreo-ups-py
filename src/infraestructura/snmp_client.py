@@ -4,6 +4,7 @@ import math
 from easysnmp import EasySNMPTimeoutError, Session
 
 import config.configuracion as c
+from config.entorno import AjustesSNMP
 
 # Valor numerico de un OID; None si no hubo respuesta o no es un numero valido
 Numero = int | float
@@ -16,14 +17,14 @@ class ClienteSNMP:
     si no respondio a uno, esperar el timeout de cada OID restante solo alarga la ejecucion.
     """
 
-    def __init__(self, hostname: str) -> None:
+    def __init__(self, hostname: str, ajustes: AjustesSNMP) -> None:
         self.fullhostname = hostname + c.SUFIJO
         self.session = Session(
             hostname=self.fullhostname,
-            community=c.COMMUNITY,
+            community=ajustes.community,
             version=c.VERSION_SNMP,
-            timeout=c.SNMP_TIMEOUT,
-            retries=c.SNMP_RETRIES,
+            timeout=ajustes.timeout,
+            retries=ajustes.retries,
         )
         self.logger = logging.getLogger(__name__)
         self.sin_respuesta = False
