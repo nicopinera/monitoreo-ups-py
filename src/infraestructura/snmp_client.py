@@ -30,6 +30,10 @@ class ClienteSNMP:
             version=c.VERSION_SNMP,
             timeout=ajustes.timeout,
             retries=ajustes.retries,
+            # TimeTicks (la autonomia de los APC) como numero de centesimas de segundo, igual
+            # que easysnmp. Por defecto ezsnmp los da como texto ("0:20:34.00") y no se pueden
+            # convertir a numero: la metrica quedaba sin dato.
+            print_timeticks_numerically=True,
         )
         self.logger = logging.getLogger(__name__)
         self.sin_respuesta = False
