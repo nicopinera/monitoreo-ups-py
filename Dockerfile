@@ -44,8 +44,11 @@ LABEL org.opencontainers.image.title="monitoreo-ups" \
 # La base y los logs van a /app/data (RUTA_RAIZ es /app): ahi se monta el volumen.
 # No se declara VOLUME: si se corre sin montar /app/data falla a la vista en lugar de crear
 # volumenes anonimos que se acumulan.
+# TZ: sin ella el contenedor usa UTC y la hora de los mensajes y del log sale 3 h adelantada.
+# La imagen base trae tzdata. Se puede cambiar con TZ en el .env (compose la pasa con env_file).
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONPATH=/app/src \
+    TZ=America/Argentina/Cordoba \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
