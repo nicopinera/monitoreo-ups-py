@@ -42,7 +42,7 @@ humedad_ups/
 Define los parámetros SNMP necesarios:
 
 - `HOST_NAME`: Host del sensor de humedad (`f2r7u1.psi.unc.edu.ar`)
-- `COMMUNITY`: Comunidad SNMP para autenticación (`publicapc`)
+- `SNMP_COMMUNITY` (en el `.env`): Comunidad SNMP para autenticación
 - `ODIH2`: OID que identifica el sensor de humedad (`1.3.6.1.4.1.318.1.1.25.1.2.1.7.2.1`)
 
 #### **main.py** - Función principal
@@ -88,12 +88,12 @@ Define una enumeración con todos los tipos de errores posibles que puede genera
 
 ```python
 class Errores(Enum):
-    TEMPERATURA_BATERIA_ALTA = 1    # Temperatura de batería excede umbral
-    UIO_ROTO = 2                    # Sensor de temperatura ambiental desconectado
-    UIO_TEMPERATURA_ALTA = 3        # Temperatura ambiente excede umbral
-    CARGA_MINIMA = 4                # Carga de batería por debajo del umbral
-    LOAD_MAXIMO = 5                 # Carga a la salida excede umbral
-    AUTONOMIA_MINIMO = 6            # Tiempo de autonomía por debajo del umbral
+    TEMPERATURA_BATERIA_ALTA = 1  # Temperatura de batería excede umbral
+    UIO_ROTO = 2  # Sensor de temperatura ambiental desconectado
+    UIO_TEMPERATURA_ALTA = 3  # Temperatura ambiente excede umbral
+    CARGA_MINIMA = 4  # Carga de batería por debajo del umbral
+    LOAD_MAXIMO = 5  # Carga a la salida excede umbral
+    AUTONOMIA_MINIMO = 6  # Tiempo de autonomía por debajo del umbral
 ```
 
 Esta enumeración es utilizada por las funciones de validación y por la base de datos para mantener un registro consistente de los tipos de errores.
@@ -150,17 +150,17 @@ CREATE TABLE errores(
 #### Atributos de la clase
 
 ```python
-hostname             # Nombre corto del UPS (ej: f1r2u1)
-full_hostname        # HOSTNAME completo (ej: f1r2u1.psi.unc.edu.ar)
-url                  # URL webhook para envío de alertas
-session              # Objeto sesión SNMP
-db                   # Instancia de BaseDatos para gestión de errores
+hostname  # Nombre corto del UPS (ej: f1r2u1)
+full_hostname  # HOSTNAME completo (ej: f1r2u1.psi.unc.edu.ar)
+url  # URL webhook para envío de alertas
+session  # Objeto sesión SNMP
+db  # Instancia de BaseDatos para gestión de errores
 temperatura_bateria  # Temperatura de la batería (°C)
-temperatura_uio1     # Temperatura del sensor ambiental UIO (°C)
-carga                # Porcentaje de carga de batería (%)
-load                 # Porcentaje de carga de salida (%)
-tiempo_autonomia     # Tiempo de autonomía en caso de fallo (minutos)
-corriente            # Corriente suministrada por el UPS (Amperios)
+temperatura_uio1  # Temperatura del sensor ambiental UIO (°C)
+carga  # Porcentaje de carga de batería (%)
+load  # Porcentaje de carga de salida (%)
+tiempo_autonomia  # Tiempo de autonomía en caso de fallo (minutos)
+corriente  # Corriente suministrada por el UPS (Amperios)
 ```
 
 #### Métodos de la clase
@@ -247,7 +247,7 @@ Este formato es consumido directamente por Grafana para visualización
 HOST_NAME_SHORT_F1  # Piso 1: f1r2u1, f1r3u1, f1r7u1, f1r9u1, f1r10u2, f1r11u1, f1r11u2
 HOST_NAME_SHORT_F2  # Piso 2: 15 UPS (f2r1u1, f2r1u2, ..., f2r11u1, f2r11u2)
 HOST_NAME_SHORT_F3  # Piso 3: f3r11u1, f3r11u2
-HOST_NAME_SHORT     # Lista combinada
+HOST_NAME_SHORT  # Lista combinada
 ```
 
 #### OIDs SNMP (Object Identifiers)
@@ -287,7 +287,7 @@ Cada función también genera un mensaje de alerta descriptivo con el valor actu
    - Función `borrar_si_vieja()` elimina la BD si tiene más de 10 minutos sin uso
    - Evita acumulación de archivos de BD innecesarios
 
-2. Carga variables de entorno usando `dotenv` (cargar `PASSWORDCHAT` con URL webhook)
+2. Carga la configuración del `.env` (ver `.env.example`), incluido `GOOGLE_CHAT_WEBHOOK_URL`
 
 3. Inicializa lista vacía `ups_list` para almacenar objetos UPS
 
@@ -317,6 +317,6 @@ python-dotenv  # Carga de variables de entorno
 
 ### Configuración requerida
 
-- Archivo `.env` en raíz del proyecto con: `PASSWORDCHAT=<URL_del_webhook>`
-- Acceso SNMP a los UPS (puerto 161, comunidad `publicapc`)
+- Archivo `.env` en raíz del proyecto, copiado de `.env.example`: `SNMP_COMMUNITY` y `GOOGLE_CHAT_WEBHOOK_URL`
+- Acceso SNMP a los UPS (puerto 161)
 - Conectividad de red a todos los equipos en dominio `psi.unc.edu.ar`

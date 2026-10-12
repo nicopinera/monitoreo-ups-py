@@ -1,0 +1,11 @@
+# Lista de lo que SI entra al contexto del build (todo lo demas se ignora).
+# Asi un archivo nuevo con secretos (.env, backups de la base, etc.) nunca termina en la imagen
+# por olvido: hay que agregarlo aca a proposito.
+*
+!pyproject.toml
+!uv.lock
+!src/
+
+# Dentro de src, sin archivos generados
+**/__pycache__
+**/*.pyc

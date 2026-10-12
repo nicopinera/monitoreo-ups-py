@@ -1,18 +1,101 @@
-# Definimos la imagen de Docker con Python
-image: python:3.9
+stages: [calidad, test, seguridad, build]
 
-# Definimos las etapas
-stages:
-  - test
+variables:
+  UV_VERSION: "0.13.0"
+  PYTHON_IMAGE: "python:3.13-slim-trixie"   # la misma version que .python-version y el Dockerfile
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  UV_LINK_MODE: copy
 
-# Configuración del Job de pruebas
-run_tests:
-  stage: test
+workflow:
   rules:
-    # Esta regla indica que el job solo se cree si el evento es un Merge Request
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+.uv:
+  image: $PYTHON_IMAGE
+  # El pipeline programado (semanal) solo corre pip-audit: busca CVEs nuevas sin cambios de codigo
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+  cache:
+    key: { files: [uv.lock] }
+    paths: [.uv-cache]
   before_script:
-    - apt-get update && apt-get install -y build-essential libsnmp-dev
-    - make install_dependencias_ci
+    - pip install --quiet "uv==${UV_VERSION}"
+    - uv sync --locked            # falla si uv.lock no coincide con pyproject.toml
+  after_script:
+    - uv cache prune --ci
+
+ruff:
+  extends: .uv
+  stage: calidad
   script:
-    - pytest  # Ejecuta los tests
+    - uv run ruff check .
+    - uv run ruff format --check .
+
+mypy:
+  extends: .uv
+  stage: calidad
+  script:
+    - uv run mypy
+
+# Lint de los scripts de deploy: corren en la VM con permisos de docker
+shellcheck:
+  stage: calidad
+  image:
+    name: koalaman/shellcheck-alpine:v0.10.0
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+  script:
+    - shellcheck deploy/*.sh
+
+pytest:
+  extends: .uv
+  stage: test
+  script:
+    - uv run pytest --cov --cov-report=term --cov-report=xml --junitxml=report.xml
+  coverage: '/TOTAL.*? (\d+(?:\.\d+)?)%/'
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+      coverage_report: { coverage_format: cobertura, path: coverage.xml }
+
+pip-audit:
+  image: $PYTHON_IMAGE
+  stage: seguridad
+  before_script:
+    - pip install --quiet "uv==${UV_VERSION}"
+  script:
+    - uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
+    - uvx pip-audit --strict --disable-pip --require-hashes -r requirements.txt
+
+# Verifica que el Dockerfile construye y que la imagen arranca. No publica nada (no hay registry):
+# la imagen productiva la construye la VM (paso 14 del plan).
+docker-build:
+  stage: build
+  image: docker:28
+  services:
+    - name: docker:28-dind
+      # Sin TLS: el runner compartido no comparte /certs/client entre el servicio y el job,
+      # asi que el cliente no tendria los certificados. La conexion es interna al job.
+      # Desde Docker 27 escuchar en TCP sin TLS hay que pedirlo explicitamente.
+      command: ["--tls=false"]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+  script:
+    - docker build --build-arg GIT_SHA="$CI_COMMIT_SHORT_SHA" -t monitoreo-ups:ci .
+    # Las dependencias cargan (ezsnmp incluye su libreria de net-snmp)
+    - docker run --rm --network none --entrypoint python monitoreo-ups:ci -c "import main"
+    # Sin configuracion el programa arranca, la valida y sale con 1 explicando el problema
+    - |
+      set +e
+      docker run --rm --network none monitoreo-ups:ci 2> stderr.txt
+      codigo=$?
+      set -e
+      cat stderr.txt
+      test "$codigo" -eq 1
+      grep -q "SNMP_COMMUNITY: falta y es obligatoria" stderr.txt

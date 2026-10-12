@@ -1,0 +1,12 @@
+# Rotacion del log del deploy. Se instala como /etc/logrotate.d/monitoreo-ups
+# (ver docs/runbook_vm.md). monitoreo.log no va aca: lo rota la propia aplicacion.
+/etc/telegraf/monitoreo-ups/data/logs/deploy.log {
+    su telegraf telegraf
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 telegraf telegraf
+}
