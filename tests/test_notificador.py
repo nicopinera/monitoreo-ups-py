@@ -9,7 +9,6 @@ from urllib.request import Request
 
 import pytest
 
-import config.configuracion as c
 import infraestructura.notificador as modulo_notificador
 from infraestructura.notificador import Notificador
 
@@ -47,9 +46,7 @@ class UrlopenFalso:
 
 @pytest.fixture
 def notificador(tmp_path: Path) -> Notificador:
-    notificador = Notificador(str(tmp_path / ".env-inexistente"))
-    notificador.url = URL
-    return notificador
+    return Notificador(URL, timeout=7.5)
 
 
 def usar_urlopen(
@@ -74,7 +71,7 @@ def test_envia_un_post_json_con_timeout(
     assert pedido.get_header("Content-type") == "application/json; charset=UTF-8"
     assert isinstance(pedido.data, bytes)
     assert json.loads(pedido.data.decode("utf-8")) == {"text": "hola ñandú"}
-    assert timeout == c.HTTP_TIMEOUT  # sin timeout, un chat colgado deja el hilo esperando
+    assert timeout == 7.5  # sin timeout, un chat colgado deja el hilo esperando
     assert caplog.text == ""
 
 

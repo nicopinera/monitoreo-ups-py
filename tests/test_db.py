@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ def db_repo(tmp_path: Path) -> RepositorioDB:
 
 def test_creacion_tablas(db_repo: RepositorioDB) -> None:
     """Verifica que las tablas se creen correctamente al inicializar."""
-    with sqlite3.connect(db_repo.db_file) as conn:
+    with closing(sqlite3.connect(db_repo.db_file)) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='errores'")
         assert cursor.fetchone() is not None

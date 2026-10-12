@@ -8,24 +8,16 @@ import config.configuracion as c
 FORMATO_LOG = "%(asctime)s %(levelname)s %(name)s [%(threadName)s] %(message)s"
 
 
-def _nivel_desde_texto(texto: str) -> int:
-    """Convierte "DEBUG", "info", etc. al nivel de logging. Si no es valido usa INFO."""
-    nivel = logging.getLevelName(str(texto).upper())
-    return nivel if isinstance(nivel, int) else logging.INFO
-
-
-def configurar_logger(log_dir: str | None = None, nivel: str | None = None) -> None:
+def configurar_logger(log_dir: str, nivel: int = logging.INFO) -> None:
     """
     Configura el logging global del proceso: todo va al archivo rotativo
     <log_dir>/monitoreo.log desde `nivel`. No se escribe nada por consola:
     - stdout queda reservado para las lineas que lee telegraf.
     - stderr solo se usa como respaldo, si no se puede abrir el archivo (desde WARNING).
 
-    log_dir: carpeta de logs. Por defecto la variable de entorno MONITOREO_LOG_DIR o c.LOGS_DIR.
-    nivel: nivel minimo del archivo. Por defecto la variable de entorno LOG_LEVEL o INFO.
+    La carpeta y el nivel vienen del entorno (MONITOREO_DATA_DIR y LOG_LEVEL, ver
+    config/entorno.py).
     """
-    log_dir = log_dir or os.getenv(c.VAR_LOG_DIR) or c.LOGS_DIR
-    nivel_log = _nivel_desde_texto(nivel or os.getenv(c.VAR_LOG_LEVEL) or "INFO")
     formato = logging.Formatter(FORMATO_LOG)
 
     # Si no se puede escribir el archivo se sigue con stderr: el logging nunca debe frenar
@@ -46,7 +38,7 @@ def configurar_logger(log_dir: str | None = None, nivel: str | None = None) -> N
         handler.setLevel(logging.WARNING)
     handler.setFormatter(formato)
 
-    logging.basicConfig(level=nivel_log, handlers=[handler], force=True)
+    logging.basicConfig(level=nivel, handlers=[handler], force=True)
 
     if error_archivo:
         logging.getLogger(__name__).warning(

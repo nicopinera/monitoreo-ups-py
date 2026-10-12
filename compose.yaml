@@ -1,0 +1,30 @@
+# Como se ejecuta el contenedor. Telegraf lo corre cada intervalo con:
+#   docker compose -f /etc/telegraf/monitoreo-ups/compose.yaml run --rm -T monitoreo
+# - run --rm: contenedor nuevo en cada ejecucion, se borra al terminar.
+# - -T: sin TTY (la TTY agrega \r al final de cada linea y rompe el line protocol).
+# - No usar `up`: antepone el nombre del contenedor a cada linea de salida.
+#
+# Las rutas relativas (./data, .env) se toman desde la carpeta de este archivo (el clon).
+# Compose ademas lee el .env de esta carpeta para completar las variables ${...} de abajo.
+
+name: monitoreo-ups
+
+services:
+  monitoreo:
+    image: monitoreo-ups:prod
+    # La imagen es local: la construye y la promueve a :prod el deploy (o `make docker-build`).
+    # Sin build: a proposito, para que un `run` nunca construya una imagen sin probar.
+    pull_policy: never
+    # Usa la red de la maquina: llega a los UPS por SNMP y resuelve los nombres igual que ella
+    network_mode: host
+    # UID:GID del duenio del clon, asi la base y los logs del volumen tienen el mismo duenio
+    # dentro y fuera del contenedor. Se definen en el .env (ver .env.example).
+    user: "${MONITOREO_UID:?falta MONITOREO_UID en el .env}:${MONITOREO_GID:?falta MONITOREO_GID en el .env}"
+    # Secretos y ajustes: se leen del .env del clon al lanzar el contenedor (no estan en la imagen)
+    env_file: .env
+    environment:
+      # Dentro del contenedor la carpeta de datos es siempre el volumen, diga lo que diga el .env
+      MONITOREO_DATA_DIR: /app/data
+    volumes:
+      # carpeta de la maquina : carpeta del contenedor
+      - ./data:/app/data

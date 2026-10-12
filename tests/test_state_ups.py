@@ -1,5 +1,6 @@
 import sqlite3
 from collections.abc import Mapping
+from contextlib import closing
 
 import pytest
 
@@ -260,7 +261,7 @@ def test_error_resuelto_que_vuelve_reactiva_la_misma_fila(
     ejecutar(RESPUESTAS_OK, notificador, repo_db)
     ejecutar(alto, notificador, repo_db)
 
-    with sqlite3.connect(repo_db.db_file) as conn:
+    with closing(sqlite3.connect(repo_db.db_file)) as conn:
         filas = conn.execute(
             "SELECT estado_error FROM errores WHERE ups_host=? AND tipo_error=?",
             (HOST, Errores.CARGA_MINIMA.name),

@@ -173,7 +173,7 @@ Telegraf corta el comando al llegar a su `timeout` (5 s por defecto en `inputs.e
 Lo que sí hay que resolver:
 
 - **Con Docker es crítico montar `data/` como volumen** (lo hace el `compose.yaml`, §5.4). Si no, cada ejecución arranca con una base vacía. Cada error activo se tomaría como nuevo **y se notificaría en cada ejecución**, llenando el chat.
-- **El `.env` no está en la imagen.** En el contenedor los secretos llegan como variables de entorno con `env_file` del `compose.yaml`. `load_dotenv` sigue sirviendo para correr local, y si el archivo no existe no hace nada. Usar el formato simple `CLAVE=valor`, sin espacios alrededor del `=` ni comentarios al final de la línea, que lo entienden igual `load_dotenv`, compose y `docker run --env-file`. El formato actual de [.env.example](../.env.example) (`PASSWORDCHAT= ""`) hay que corregirlo.
+- **El `.env` no está en la imagen.** En el contenedor los secretos llegan como variables de entorno con `env_file` del `compose.yaml`. `load_dotenv` sigue sirviendo para correr local, y si el archivo no existe no hace nada. Usar el formato simple `CLAVE=valor`, sin espacios alrededor del `=` ni comentarios al final de la línea, que lo entienden igual `load_dotenv`, compose y `docker run --env-file`. El `.env.example` ya tiene ese formato (paso 12).
 - **El SQL de creación vive en `data/`**, la misma carpeta que se monta como volumen. Dentro del contenedor se vería la copia del clon y no la de la imagen. Conviene moverlo junto al código (`src/infraestructura/schema.sql`) y leerlo relativo a `__file__`. Así `data/` sólo tiene archivos generados en ejecución.
 
 **Propuesta:**
@@ -188,6 +188,12 @@ LOGS_DIR = os.path.join(DATA_DIR, "logs")  # data/logs/ queda ignorado por el pa
 - En la VM sin Docker y en desarrollo no cambia nada: la base sigue en `data/errores.db`.
 - En el contenedor el código está en `/app/src`, así que `RUTA_RAIZ` es `/app` y la base queda en `/app/data`, que es donde se monta `data/` del clon (§5.4). `MONITOREO_DATA_DIR` sólo hace falta para usar otra base, por ejemplo en la prueba en paralelo del paso 13.
 - **Permisos:** el contenedor corre con el UID del dueño del clon (`user:` en el `compose.yaml`, §5.4). Así los archivos de `data/` tienen el mismo dueño dentro y fuera del contenedor, y no hace falta ningún `chown`.
+
+> **Estado: implementado** (pasos 7 y 12).
+>
+> - `MONITOREO_DATA_DIR` (por defecto `data`) define la carpeta de la base (`errores.db`) y de los logs (`logs/`). Una ruta relativa se toma desde la raíz del repo, no desde la carpeta donde se ejecuta el proceso. `MONITOREO_LOG_DIR` se eliminó.
+> - El `.env` se lee con `dotenv_values` al arrancar (sin modificar las variables del proceso); si una variable también está en el entorno, gana la del entorno. En Docker no hay `.env` en la imagen: las variables llegan por `env_file`.
+> - El SQL de creación vive en `src/infraestructura/schema.sql` (paso 7).
 
 #### A7. El CI no ejecuta realmente los tests
 
@@ -264,7 +270,7 @@ Nivel por defecto `WARNING`: en una ejecución normal no se escribe nada, y lo q
 >
 > - stderr muestra desde `WARNING`; el archivo, desde `LOG_LEVEL` (por defecto `INFO`).
 > - **Cambio posterior:** los logs van **sólo al archivo**, no se escribe nada por consola. stderr se usa únicamente como respaldo si no se puede abrir el archivo. Con un UPS caído, cada OID generaba un warning en la consola. Contra: cuando la ejecución falla, Telegraf ya no muestra el motivo en su log; hay que mirar `monitoreo.log`.
-> - La carpeta se puede cambiar con `MONITOREO_LOG_DIR`.
+> - La carpeta se puede cambiar con `MONITOREO_LOG_DIR`. **Cambio posterior (paso 12):** los logs van a `<MONITOREO_DATA_DIR>/logs/` y `MONITOREO_LOG_DIR` se eliminó.
 > - Si no se puede crear el archivo, se sigue sólo con stderr.
 >
 > Detalle en [docs/logger/Mejoras.md](logger/Mejoras.md). El `warnings.filterwarnings` se mantuvo, pero ahora se aplica al ejecutar y no al importar.
@@ -350,11 +356,20 @@ class BaseUPS(ABC):
 
 **Dónde:** [configuracion.py](../src/config/configuracion.py)
 
-- La comunidad SNMP (`COMMUNITY = "publicapc"`) está en el código y versionada en git. Es una credencial: debe ir a variables de entorno.
+- La comunidad SNMP (`COMMUNITY`) está en el código y versionada en git. Es una credencial: debe ir a variables de entorno.
 - La variable `PASSWORDCHAT` contiene una **URL de webhook**. Conviene renombrarla a `GOOGLE_CHAT_WEBHOOK_URL` y actualizar [.env.example](../.env.example).
 - Hay un comentario residual `# ,'f2r9u1'` ([configuracion.py:9](../src/config/configuracion.py#L9)) cuando `f2r9u1` ya está en la lista.
 - Los umbrales están documentados con valores distintos en distintos lugares: el README dice 27 °C y el código 28; el commit `480f293` dice 50 % y el código actual tiene 60. Conviene que haya **una sola fuente de verdad** (el código o un archivo de configuración) y que el README remita a ella.
 - Con Docker, cambiar un host o un umbral implica commit, build y deploy, algo aceptable gracias al cron (§6). Los **secretos** y los valores que dependen del entorno (timeouts, nivel de log) deben venir del `.env` del clon, que compose pasa al contenedor con `env_file`.
+
+> **Estado: implementado** (paso 12).
+>
+> - **Entorno** ([config/entorno.py](../src/config/entorno.py)): `SNMP_COMMUNITY` (obligatoria), `GOOGLE_CHAT_WEBHOOK_URL` (antes `PASSWORDCHAT`), `SNMP_TIMEOUT`, `SNMP_RETRIES`, `HTTP_TIMEOUT`, `MAX_WORKERS`, `LOG_LEVEL` y `MONITOREO_DATA_DIR`. Todas documentadas en [.env.example](../.env.example).
+> - **Código** ([config/configuracion.py](../src/config/configuracion.py)): hosts, OIDs, umbrales, `VERSION_SNMP` y `FP_OUT`.
+> - `cargar_entorno()` se ejecuta una sola vez al arrancar (antes de configurar el logging) y devuelve una dataclass inmutable `Entorno` que `main` pasa a cada componente. Ningún otro módulo lee variables de entorno.
+> - **Valores inválidos** (por ejemplo `SNMP_TIMEOUT=abc`, `MAX_WORKERS=0`, un webhook que no es `https://`) o la falta de `SNMP_COMMUNITY`: el monitoreo no arranca, sale con 1 y lista **todos** los problemas en stderr. Si falta el webhook, arranca igual y las alertas quedan pendientes (A8).
+> - La comunidad sigue en el historial de git: sacarla del código no la des-publica. Lo de fondo es **cambiar la comunidad en los UPS** y cargar la nueva sólo en el `.env`.
+> - Los umbrales del README siguen desactualizados; se corrige en B8.
 
 #### M8. `ThreadPoolExecutor` sin control de resultados
 
@@ -378,6 +393,14 @@ Los `Future` de `executor.submit` se descartan: cualquier excepción que escape 
   - Las excepciones están en `ezsnmp.exceptions`: `TimeoutError`, `ConnectionError`, `NoSuchObjectError`, `NoSuchInstanceError`, `NoSuchNameError`.
 
 **Propuesta:** migrar a `ezsnmp` y Python 3.12 en el paso 13 (Docker), cuando la VM deje de usar el Python del sistema. Es urgente porque **Python 3.10 llega a fin de soporte en octubre de 2026**. El cambio queda contenido en [snmp_client.py](../src/infraestructura/snmp_client.py) y en los tests que importan excepciones de easysnmp ([test_snmp_client.py](../tests/test_snmp_client.py), [test_main.py](../tests/test_main.py)). Probar contra UPS reales con SNMPv1 antes de desplegar.
+
+> **Estado: implementado** (paso 13), con **Python 3.13** (soporte hasta octubre de 2029) y `ezsnmp` 2.4. Verificado contra el UPS del DC: misma salida que con easysnmp. Diferencias encontradas al probar con equipos reales, ya contempladas en [snmp_client.py](../src/infraestructura/snmp_client.py):
+>
+> - Un OID inexistente con **SNMPv1** llega como `PacketError` con `(noSuchName)` en el mensaje, no como `NoSuchNameError`. Se trata como "sin dato" (log `DEBUG`), así el fallback `OIDT → OIDTNEW` sigue funcionando y no se llena el log de errores.
+> - Con SNMPv2c, un OID inexistente vuelve como resultado con tipo `NOSUCHOBJECT`; también se trata como sin dato.
+> - Un nombre que no resuelve DNS falla en el `get` (`ConnectionError`) y no al crear la sesión. Se trata como un timeout: corta el host, deja un warning y el UPS recibe la alerta `SIN_RESPUESTA_SNMP` (antes era una excepción de la tarea, sin alerta).
+> - **La VM no puede actualizarse con el método actual** (Python del sistema con `python3-easysnmp`): el código nuevo necesita ezsnmp. La VM sigue con la versión anterior hasta el corte del paso 14.
+> - Python 3.13 avisa (`ResourceWarning`) las conexiones SQLite sin cerrar: `RepositorioDB` ahora las cierra (adelanto de M5), y pytest convierte cualquier warning en error.
 
 #### M10. Mensajes de Google Chat más claros
 
@@ -498,7 +521,7 @@ Se mantiene la estructura actual de `src/`. El proyecto es una aplicación que s
 monitoreo-ups/                      # en la VM: /etc/telegraf/monitoreo-ups
 ├── pyproject.toml
 ├── uv.lock                         # versionado
-├── .python-version                 # 3.10 por ahora; 3.12 con ezsnmp (M9)
+├── .python-version                 # 3.13
 ├── Dockerfile
 ├── .dockerignore
 ├── compose.yaml                    # cómo se ejecuta: volumen, .env, usuario, red (§5.4)
@@ -585,21 +608,7 @@ Configuración en GitLab:
 
 Pendiente:
 
-- **Job `docker-build`** (paso 13), si el runner permite Docker-in-Docker:
-
-  ```yaml
-  docker-build:
-    stage: build # agregar "build" a stages
-    image: docker:27
-    services: [docker:27-dind]
-    variables:
-      DOCKER_TLS_CERTDIR: "/certs"
-    rules:
-      - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    script:
-      - docker build -t monitoreo-ups:ci .
-      - docker run --rm --network none --entrypoint python monitoreo-ups:ci -c "import main"
-  ```
+- **Job `docker-build`: implementado** (paso 13). Construye la imagen, verifica que las dependencias cargan (`import main`) y que el programa arranca y rechaza una configuración vacía (código 1 y el mensaje de `SNMP_COMMUNITY`). No corre en el pipeline programado. Si el runner no permite Docker-in-Docker, el job falla al iniciar el servicio `docker:28-dind`: en ese caso, quitarlo (lo valida el deploy de la VM).
 
 - **Opcional:** reporte de Code Quality de ruff en el MR (`ruff check --output-format=gitlab --output-file=gl-code-quality.json`, publicado como `artifacts:reports:codequality`).
 
@@ -616,7 +625,7 @@ Notas:
 
 ### 5.1 Decisiones
 
-- **Imagen base:** `python:3.12-slim-bookworm`, con `ezsnmp` en lugar de easysnmp (M9). Su wheel incluye `libnetsnmp`, así que la imagen no necesita compilador, `libsnmp-dev` ni `libsnmp40`. Build en dos etapas igual, para no llevar uv a la imagen final.
+- **Imagen base:** `python:3.13-slim-trixie`, con `ezsnmp` (M9). Su wheel incluye `libnetsnmp`, así que la imagen no necesita compilador ni paquetes del sistema. Build en dos etapas: la primera tiene uv y arma el `.venv`; la final sólo copia el `.venv` y `src/`.
 - **Sin instalar el proyecto:** la imagen lleva el `.venv/` con las dependencias y una copia de `src/` en `/app/src`. Se ejecuta con `python /app/src/main.py`, igual que hoy en la VM.
 - **Usuario no root:** la imagen crea el usuario `ups` (UID `10001`), pero en producción el contenedor corre con el UID del dueño del clon (`user:` del `compose.yaml`, §5.4), para que los archivos de `data/` tengan el mismo dueño dentro y fuera del contenedor.
 - **Contenedor efímero:** Telegraf hace `docker compose run --rm` en cada intervalo. La imagen no tiene `CMD` de larga duración.
@@ -626,83 +635,20 @@ Notas:
 - **Red:** `--network host`, para llegar a los UPS por SNMP con la misma resolución DNS y rutas que la VM, sin configurar redes de Docker.
 - **stdout limpio:** en stdout sólo puede salir line protocol. Los logs van sólo a `/app/data/logs/monitoreo.log`, dentro del volumen (M1). Ejecutar siempre sin TTY (`-T` en `docker compose run`), porque la TTY agrega `\r` y rompe el parseo.
 
-### 5.2 `Dockerfile` propuesto
+### 5.2 `Dockerfile`
 
-```dockerfile
-# syntax=docker/dockerfile:1.7
-ARG PYTHON_VERSION=3.12
+> **Estado: implementado** (paso 13), ver [Dockerfile](../Dockerfile).
 
-# ---------- builder ----------
-FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /uvx /bin/
-
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_PYTHON_DOWNLOADS=never
-
-WORKDIR /app
-
-# Sólo dependencias: el proyecto no se instala (package = false).
-# Capa cacheada mientras no cambien uv.lock ni pyproject.toml.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-dev
-
-# ---------- runtime ----------
-FROM python:${PYTHON_VERSION}-slim-bookworm
-
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin ups \
- && mkdir -p /app/data && chown ups /app/data
-
-WORKDIR /app
-COPY --from=builder /app/.venv /app/.venv
-COPY src ./src
-
-ARG GIT_SHA=desconocido
-LABEL org.opencontainers.image.title="monitoreo-ups" \
-      org.opencontainers.image.revision="${GIT_SHA}"
-
-ENV PATH="/app/.venv/bin:${PATH}" \
-    PYTHONPATH=/app/src \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    MONITOREO_VERSION="${GIT_SHA}"
-
-# En producción se pisa con user: del compose.yaml (UID del dueño del clon, §5.4)
-USER ups
-ENTRYPOINT ["python", "/app/src/main.py"]
-```
-
-- `RUTA_RAIZ` se calcula como `/app`, así que la base y los logs quedan en `/app/data` sin definir variables de entorno (A6).
+- **Capas:** primero las dependencias (`pyproject.toml` + `uv.lock`, con caché de uv) y después `src/`. Un cambio de código sólo reconstruye la última capa.
+- `RUTA_RAIZ` se calcula como `/app`, así que la base y los logs quedan en `/app/data`, el volumen.
 - `PYTHONPATH=/app/src` permite el smoke test `python -c "import main"` (§4.2 y §6.2).
-- No se declara `VOLUME`: el volumen se monta siempre de forma explícita con `-v`. Así una corrida sin `-v` falla a la vista en lugar de crear volúmenes anónimos que se acumulan.
-
-> Si el `COPY --from=ghcr.io/...` no funciona porque la VM no tiene salida a ghcr.io, reemplazarlo por `RUN pip install "uv==<versión>"` en el builder.
+- No se declara `VOLUME`: sin `-v` el programa falla a la vista en lugar de crear volúmenes anónimos.
+- Usuario `ups` (UID 10001) sin privilegios; en producción compose lo reemplaza por el del dueño del clon.
+- Si la VM no llega a `ghcr.io`, reemplazar el `COPY --from=ghcr.io/astral-sh/uv` por `RUN pip install "uv==<versión>"` en la primera etapa.
 
 ### 5.3 `.dockerignore`
 
-```text
-.git
-.gitlab-ci.yml
-compose.yaml
-.venv
-venv
-.env
-*.env
-data
-logs
-docs
-tests
-deploy
-**/__pycache__
-.mypy_cache
-.ruff_cache
-.pytest_cache
-.coverage
-coverage.xml
-report.xml
-```
+> **Estado: implementado**, ver [.dockerignore](../.dockerignore). Es una **lista de lo permitido**: se ignora todo (`*`) y sólo entran `pyproject.toml`, `uv.lock` y `src/`. Así un archivo nuevo con secretos (un `.env` con otro nombre, un backup de la base) nunca termina en la imagen por olvido.
 
 ### 5.4 Ejecución desde Telegraf
 
@@ -721,21 +667,21 @@ Todo vive en el clon `/etc/telegraf/monitoreo-ups`, y un único usuario (`telegr
 
 **Logs:** la base y los logs comparten el mismo volumen (`data/`), así que alcanza con un solo volumen. Hoy los logs se escriben en `logs/` en la raíz del repo; con el cambio de A6 pasan a `data/logs/` (el patrón `logs/` del `.gitignore` los cubre en cualquier nivel). Como el contenedor es efímero, si los logs no estuvieran en el volumen se perderían en cada ejecución. El `RotatingFileHandler` rota dentro del volumen igual que sin Docker. Para leerlos: `tail -f /etc/telegraf/monitoreo-ups/data/logs/monitoreo.log`.
 
-Preparación de la VM (una sola vez):
+**Instalar Docker Compose y Buildx en la VM (Ubuntu 24.04).** El `Dockerfile` usa BuildKit (`RUN --mount`), que viene con el plugin `buildx`. El paquete depende de cómo se instaló Docker:
 
 ```bash
-cd /etc/telegraf/monitoreo-ups
-sudo chown -R telegraf:telegraf .                 # un solo dueño para clon, base y logs
-sudo -u telegraf mkdir -p data/logs
-sudo -u telegraf mv logs/* data/logs/ 2>/dev/null; sudo rmdir logs   # logs viejos (opcional)
-# .env: formato CLAVE=valor (A6) y agregar UID_TELEGRAF / GID_TELEGRAF
-sudo chmod 600 .env && sudo chown telegraf:telegraf .env
-sudo usermod -aG docker telegraf && sudo systemctl restart telegraf
-id -u telegraf; id -g telegraf                    # valores de UID_TELEGRAF y GID_TELEGRAF
-sudo apt install docker-compose-plugin            # si `docker compose version` falla
+docker compose version; docker buildx version     # si las dos responden, no hace falta nada
+dpkg -l | grep -E "docker-ce |docker.io "          # ¿de dónde vino Docker?
+
+# Si aparece docker-ce (repositorio oficial de Docker):
+sudo apt update && sudo apt install docker-compose-plugin docker-buildx-plugin
+# Si aparece docker.io (repositorio de Ubuntu):
+sudo apt update && sudo apt install docker-compose-v2 docker-buildx
+
+docker compose version; docker buildx version     # verificar
 ```
 
-La base `data/errores.db` ya está en su lugar, así que **no hay que migrar el estado de las alertas**.
+Preparación de la VM: ver el [runbook](runbook_vm.md). En lugar de transformar el clon actual, se arma uno nuevo en paralelo y se intercambian en un corte de alrededor de un minuto, copiando `data/errores.db` (**no hay que migrar el estado de las alertas**, sólo copiar el archivo).
 
 > **Seguridad:** pertenecer al grupo `docker` equivale a tener acceso root en la VM. Es aceptable en una VM dedicada al monitoreo; si no lo es, usar Docker rootless o un wrapper con una regla de `sudoers` acotada.
 
@@ -748,35 +694,21 @@ SNMP_TIMEOUT=1
 SNMP_RETRIES=1
 LOG_LEVEL=INFO
 MAX_WORKERS=13
-UID_TELEGRAF=<id -u telegraf>
-GID_TELEGRAF=<id -g telegraf>
+MONITOREO_UID=<id -u telegraf>
+MONITOREO_GID=<id -g telegraf>
 ```
 
 - `LOG_LEVEL` es el nivel del archivo `data/logs/monitoreo.log`, el único destino de los logs.
-- `UID_TELEGRAF`/`GID_TELEGRAF` no los usa la aplicación: compose lee automáticamente el `.env` de la carpeta del `compose.yaml` para completar las variables `${...}`. Así el UID de la VM no queda en git.
+- `MONITOREO_UID`/`MONITOREO_GID` no los usa la aplicación: compose lee automáticamente el `.env` de la carpeta del `compose.yaml` para completar las variables `${...}`. Así el UID de la VM no queda en git.
 - No poner comentarios al final de una línea.
 
-`compose.yaml` (en la raíz del repo, versionado):
-
-```yaml
-name: monitoreo-ups
-
-services:
-  monitoreo:
-    image: monitoreo-ups:prod
-    pull_policy: never # la imagen es local: la construye y promueve el deploy (§6)
-    network_mode: host
-    user: "${UID_TELEGRAF:?falta en .env}:${GID_TELEGRAF:?falta en .env}"
-    env_file: .env
-    volumes:
-      - ./data:/app/data
-```
+`compose.yaml`: implementado en el paso 13, ver [compose.yaml](../compose.yaml). Además de lo descripto acá, fuerza `MONITOREO_DATA_DIR=/app/data` dentro del contenedor (gana sobre el `.env`), así el volumen es siempre la carpeta de datos aunque el `.env` diga otra cosa.
 
 - Las rutas relativas (`./data`, `.env`) se resuelven desde la carpeta del `compose.yaml`, o sea, el clon. En el contenedor `data/` del clon se ve como `/app/data`, que es la ruta que calcula el código (A6).
 - **No tiene `build:`** a propósito: si lo tuviera, un `run` podría construir una imagen nueva y saltear el smoke test y la promoción a `:prod` de `actualizar.sh`. El build sólo lo hace el script de deploy.
 - `${VAR:?mensaje}` hace que compose falle con un mensaje claro si falta la variable en el `.env`.
 
-Snippet de Telegraf (`deploy/telegraf-monitoreo-ups.conf` → `/etc/telegraf/telegraf.d/`):
+Input de Telegraf ([deploy/telegraf-monitoreo-ups.conf](../deploy/telegraf-monitoreo-ups.conf) → `/etc/telegraf/telegraf.d/monitoreo-ups.conf`):
 
 ```toml
 [[inputs.exec]]
@@ -802,133 +734,57 @@ Snippet de Telegraf (`deploy/telegraf-monitoreo-ups.conf` → `/etc/telegraf/tel
 
 ## 6. Despliegue automático con cron en la VM
 
+> **Estado: implementado en el repo** (paso 14): [deploy/](../deploy/). La instalación en la VM,
+> paso a paso, está en el [runbook](runbook_vm.md).
+
 ### 6.1 Flujo
 
 ```text
-cron (cada 5 min)
+cron (cada 5 min, usuario telegraf)
   └─ deploy/actualizar.sh
        ├─ flock: si ya hay un deploy corriendo, sale
-       ├─ git fetch origin main
+       ├─ git fetch origin main                          (si falla: avisa una vez y sale)
+       ├─ ¿este commit ya falló y se avisó? → sale        (reintento a mano: FORCE=1)
        ├─ ¿HEAD == origin/main y la imagen <sha> existe? → sale (no hay cambios)
        ├─ git reset --hard origin/main + git clean -fd   (no toca .env ni data/: están ignorados)
        ├─ docker build -t monitoreo-ups:<sha>
-       ├─ smoke test: docker run --network none ... import main
+       ├─ smoke test: import main + "sin configuración sale con 1"
        ├─ docker tag monitoreo-ups:<sha> monitoreo-ups:prod   ← recién acá cambia producción
-       ├─ borrar tags viejos (conserva los últimos N) + docker image prune -f
-       └─ (opcional) avisar a Google Chat del deploy o del fallo
+       ├─ borrar tags viejos (conserva los últimos 3) + docker image prune -f
+       └─ aviso a Google Chat del deploy (o del fallo, una sola vez por commit)
 ```
 
 Si el build o el smoke test fallan, `:prod` sigue apuntando a la imagen anterior y **el monitoreo no se interrumpe**.
 
 > Aclaración: el comando es `docker image prune`; `docker image purge` no existe. `prune -f` borra sólo las imágenes _dangling_ (sin tag), que son las que deja cada rebuild. Los tags viejos se borran a propósito en el script, y el caché de build se limpia aparte con `docker builder prune`.
 
-### 6.2 `deploy/actualizar.sh` propuesto
+### 6.2 `deploy/`
 
-```bash
-#!/usr/bin/env bash
-# Actualiza el clon de main, construye la imagen y la promueve a :prod si pasa el smoke test.
-# Pensado para ejecutarse desde cron. Idempotente: si no hay cambios, no hace nada.
-set -Eeuo pipefail
+| Archivo                                                                    | Se instala en                                  | Qué hace                                                    |
+| -------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------- |
+| [actualizar.sh](../deploy/actualizar.sh)                                   | se ejecuta desde el clon                       | El flujo de §6.1.                                           |
+| [cron-monitoreo-ups](../deploy/cron-monitoreo-ups)                         | `/etc/cron.d/monitoreo-ups`                    | Ejecuta el script cada 5 min como `telegraf`.               |
+| [telegraf-monitoreo-ups.conf](../deploy/telegraf-monitoreo-ups.conf)       | `/etc/telegraf/telegraf.d/monitoreo-ups.conf`  | El `[[inputs.exec]]` con `docker compose run` (§5.4).       |
+| [logrotate-monitoreo-ups](../deploy/logrotate-monitoreo-ups)               | `/etc/logrotate.d/monitoreo-ups`               | Rota `data/logs/deploy.log` cada semana.                    |
 
-REPO_DIR="${REPO_DIR:-/etc/telegraf/monitoreo-ups}"
-BRANCH="${BRANCH:-main}"
-IMAGE="${IMAGE:-monitoreo-ups}"
-PROD_TAG="${PROD_TAG:-prod}"
-KEEP_IMAGES="${KEEP_IMAGES:-3}"
-LOCK_FILE="${LOCK_FILE:-/var/lock/monitoreo-ups-deploy.lock}"
-ENV_FILE="${ENV_FILE:-$REPO_DIR/.env}"
+Cambios respecto del script propuesto originalmente, encontrados al probarlo:
 
-log() { echo "$(date --iso-8601=seconds) [deploy] $*"; }
-
-notificar() {
-  # Aviso opcional a Google Chat usando el mismo webhook del monitoreo.
-  local url
-  url="$(grep -E '^GOOGLE_CHAT_WEBHOOK_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)"
-  [[ -n "$url" ]] || return 0
-  curl -fsS --max-time 10 -H 'Content-Type: application/json' \
-       -d "{\"text\": \"$1\"}" "$url" >/dev/null || true
-}
-
-main() {
-  exec 9>"$LOCK_FILE"
-  if ! flock -n 9; then
-    log "Otro deploy en curso, salgo."
-    exit 0
-  fi
-
-  cd "$REPO_DIR"
-  git fetch --quiet origin "$BRANCH"
-
-  local local_sha remote_sha short_sha
-  local_sha="$(git rev-parse HEAD)"
-  remote_sha="$(git rev-parse "origin/$BRANCH")"
-  short_sha="$(git rev-parse --short=12 "origin/$BRANCH")"
-
-  if [[ "$local_sha" == "$remote_sha" ]] && docker image inspect "$IMAGE:$short_sha" >/dev/null 2>&1; then
-    exit 0  # nada que hacer
-  fi
-
-  log "Actualizando $local_sha -> $remote_sha"
-  git reset --hard --quiet "origin/$BRANCH"
-  # Sin -x: los archivos ignorados (.env, data/errores.db, data/logs/) no se tocan.
-  git clean -fd --quiet
-
-  log "Construyendo $IMAGE:$short_sha"
-  docker build --pull \
-    --build-arg GIT_SHA="$short_sha" \
-    -t "$IMAGE:$short_sha" .
-
-  log "Smoke test"
-  docker run --rm --network none --entrypoint python "$IMAGE:$short_sha" \
-    -c "import main"
-
-  docker tag "$IMAGE:$short_sha" "$IMAGE:$PROD_TAG"
-  log "Promovida $IMAGE:$short_sha a :$PROD_TAG"
-
-  # Conservar las últimas KEEP_IMAGES versiones (además de :prod) para rollback
-  docker image ls "$IMAGE" --format '{{.Tag}}' \
-    | grep -vE "^($PROD_TAG|<none>)$" \
-    | tail -n +"$((KEEP_IMAGES + 1))" \
-    | xargs -r -I{} docker image rm "$IMAGE:{}" >/dev/null || true
-  docker image prune -f >/dev/null
-  docker builder prune -f --filter "until=168h" >/dev/null || true
-
-  notificar "✅ monitoreo-ups desplegado: ${short_sha}"
-}
-
-trap 'log "ERROR en línea $LINENO"; notificar "❌ Falló el deploy de monitoreo-ups (ver data/logs/deploy.log)"' ERR
-
-# Todo el cuerpo está en main(): bash lee el script completo antes de ejecutarlo,
-# así un `git reset` que modifique este archivo no afecta a la ejecución en curso.
-main "$@"
-```
-
-`docker image ls` lista de más nuevo a más viejo, así que `tail -n +N` deja afuera las N más recientes.
+- **Si el smoke test falla, la imagen se borra.** Si quedaba, la pasada siguiente veía "clon al día e imagen existente", la daba por desplegada y nunca promovía ni reintentaba.
+- **Un fallo se avisa una sola vez.** El script guarda en `data/deploy_fallido` el commit que falló (o `fetch` si no se pudo consultar GitLab). No reconstruye ese commit en cada pasada ni repite el aviso; espera el próximo commit o un reintento manual con `FORCE=1`.
+- **`/data/` entera en `.gitignore`.** Antes sólo estaban ignorados `*.db` y `logs/`: `git clean -fd` borraba `data/deploy_fallido` y podía borrar `errores.db-journal` (o `-wal`/`-shm` con WAL, M5) en medio de una escritura.
+- **Smoke test igual al del CI:** además de `import main`, verifica que sin configuración el programa sale con 1 nombrando `SNMP_COMMUNITY`.
+- **Mensajes claros** en el log y en Google Chat para cada paso que puede fallar (fetch, build, smoke test).
+- **No corre como root**, porque dejaría el clon y el lock de root y el cron de `telegraf` no podría usarlos.
+- Lock en `/run/lock` (escribible por todos en Ubuntu, y fuera del clon para que `git clean` no lo borre).
+- `shellcheck` en el CI (etapa calidad) y en `make lint`.
 
 ### 6.3 Instalación en la VM
 
-````bash
-Se reutiliza el clon existente en `/etc/telegraf/monitoreo-ups`, ya preparado en §5.4 (dueño `telegraf`, en el grupo `docker`).
+Ver el [runbook](runbook_vm.md): requisitos, usuario `telegraf`, deploy key, clon, `.env`, primer deploy, Telegraf, cron, verificaciones, rollback y migración desde la instalación actual.
 
-```bash
-# 1. Deploy token de sólo lectura (GitLab → Settings → Repository → Deploy tokens, scope read_repository)
-cd /etc/telegraf/monitoreo-ups
-sudo -u telegraf git remote set-url origin https://<token_user>:<token>@<gitlab>/<grupo>/monitoreo-ups.git
-#    (o una deploy key SSH de sólo lectura)
-sudo -u telegraf git status   # tiene que estar limpio; si hay cambios locales, guardarlos antes del primer reset
-
-# 2. Primer deploy manual
-sudo -u telegraf /etc/telegraf/monitoreo-ups/deploy/actualizar.sh
-
-# 3. Cron (crontab -e -u telegraf)
-*/5 * * * * /etc/telegraf/monitoreo-ups/deploy/actualizar.sh >> /etc/telegraf/monitoreo-ups/data/logs/deploy.log 2>&1
-
-# 4. Rotación del log (/etc/logrotate.d/monitoreo-ups)
-/etc/telegraf/monitoreo-ups/data/logs/deploy.log { weekly rotate 8 compress missingok notifempty su telegraf telegraf }
-````
-
-- El log del deploy queda junto al de la aplicación, en `data/logs/`, así todos los logs están en un solo lugar. `deploy.log` lo rota `logrotate`; `monitoreo.log` lo rota la propia aplicación (M1).
-- Cambiar `LOCK_FILE` a una ruta donde `telegraf` pueda escribir si `/var/lock` no lo permite (en Debian/Ubuntu es `/run/lock`, escribible por todos). No ponerlo dentro del clon: `git clean -fd` lo borraría.
+- Se usa una **deploy key** SSH de sólo lectura generada en la VM, no la clave personal de un administrador: la clave personal da escritura sobre todos sus proyectos y el cron (`telegraf`) no podría leerla.
+- El log del deploy queda junto al de la aplicación, en `data/logs/`. `deploy.log` lo rota `logrotate`; `monitoreo.log` lo rota la propia aplicación (M1).
+- El cron va en `/etc/cron.d/` (visible, con el usuario en la línea) en lugar del crontab de `telegraf`.
 
 > Un `systemd timer` reemplaza bien a cron: da logs en `journalctl` y evita ejecuciones superpuestas de forma nativa. Es opcional; cron + `flock` alcanza.
 
@@ -964,8 +820,8 @@ Cada paso es **un MR independiente**, en este orden. El orden sigue tres criteri
 | ✅ 9  | `ruff --fix` + `ruff format` (sólo formato)                             | S      | 8          |
 | ✅ 10 | A7 — CI nuevo (ruff, pytest + cobertura, pip-audit; mypy no bloqueante) | M      | 9          |
 | ✅ 11 | B5 — Type hints, mypy `strict` y reglas completas de ruff               | M      | 10         |
-| 12    | A6 + M7 — Configuración y secretos por variables de entorno             | M      | 8          |
-| 13    | Docker + `ezsnmp` y Python 3.12 (M9)                                    | M      | 12         |
+| ✅ 12 | A6 + M7 — Configuración y secretos por variables de entorno             | M      | 8          |
+| ✅ 13 | Docker + `ezsnmp` y Python 3.13 (M9)                                    | M      | 12         |
 | 14    | Deploy automático (cron, Telegraf con `docker compose run`, corte)      | M      | 13         |
 | 15    | M5 — Modelo de la tabla de errores                                      | M      | 14         |
 | 16    | M4 — Contrato `BaseUPS` homogéneo                                       | L      | 14         |
@@ -1010,17 +866,22 @@ Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rá
 
 ### Etapa 3 — Despliegue automático
 
-- [ ] **12. A6 + M7:** base y logs en `data/` (`data/logs/`), `.env` en formato `CLAVE=valor`, comunidad SNMP, webhook (renombrado a `GOOGLE_CHAT_WEBHOOK_URL`), timeouts y nivel de log por variables de entorno.
-- [ ] **13. Docker:**
-  - `Dockerfile`, `.dockerignore` y `compose.yaml`.
-  - Migrar a `ezsnmp` y Python 3.12 (M9): `snmp_client.py`, tests, `.python-version`, `requires-python`, `target-version` de ruff, `python_version` de mypy e imagen del CI.
-  - Probar la imagen en la VM **en paralelo** al esquema actual, con un `docker run` directo que monte otra carpeta como `/app/data` (por ejemplo `-v /tmp/monitoreo-prueba:/app/data`), sin webhook y escribiendo a un measurement de prueba.
-- [ ] **14. Deploy:**
-  - `deploy/actualizar.sh` y su cron (§6).
-  - Preparar el clon `/etc/telegraf/monitoreo-ups` (§5.4): dueño `telegraf`, `data/logs/`, `.env` con permisos 600. La base ya está en `data/`, no hay que migrarla.
-  - Agregar `UID_TELEGRAF`/`GID_TELEGRAF` al `.env` y cambiar Telegraf a `docker compose run`.
-  - Comprobar que un cambio trivial en `main` se despliega solo.
-  - Probar un rollback.
+- [x] **12. A6 + M7:** base y logs en `data/` (`data/logs/`), `.env` en formato `CLAVE=valor`, comunidad SNMP, webhook (renombrado a `GOOGLE_CHAT_WEBHOOK_URL`), timeouts y nivel de log por variables de entorno.
+  - [X] **Antes de desplegar**, en el `.env` de la VM: agregar `SNMP_COMMUNITY=<la comunidad actual>` (sin ella no arranca), renombrar `PASSWORDCHAT` → `GOOGLE_CHAT_WEBHOOK_URL`, sacar comillas y espacios. Probar a mano con `python3 src/main.py >/dev/null; echo $?` antes de que lo corra Telegraf.
+  - [X] Después de desplegar: los logs nuevos van a `data/logs/`; mover o borrar la carpeta `logs/` vieja.
+- [x] **13. Docker:**
+  - [x] `Dockerfile`, `.dockerignore` (lista de permitidos) y `compose.yaml`. `make docker-build` / `make docker-run`.
+  - [x] Migrar a `ezsnmp` y **Python 3.13** (M9), verificado contra el UPS del DC.
+  - [x] Job `docker-build` en el CI.
+  - [x] `MONITOREO_UID`/`MONITOREO_GID` en el `.env.example` (los usa compose).
+  - [X] Instalar compose y buildx en la VM (§5.4) y probar la imagen **en paralelo** al esquema actual, sin tocarlo: clonar en otra carpeta, `.env` con `GOOGLE_CHAT_WEBHOOK_URL` vacío y `MONITOREO_DATA_DIR` propio, `make docker-build` y comparar con `diff` la salida de `docker compose run --rm -T monitoreo` contra la de `python3 src/main.py` del clon actual. Lo importante: los 28 equipos con los mismos campos, incluidos los de firmware viejo (`OIDTNEW`).
+- [ ] **14. Deploy:** en el repo está hecho; falta la VM, siguiendo el [runbook](runbook_vm.md) (anexo de migración).
+  - [x] `deploy/actualizar.sh`, cron, input de Telegraf y logrotate (§6.2), probados con un remoto local: deploy, sin cambios, fallo de smoke test, `FORCE=1`, fallo de fetch y limpieza de imágenes.
+  - [x] `/data/` en `.gitignore`; `shellcheck` en el CI y en `make lint`.
+  - [ ] VM: deploy key, clon nuevo en paralelo (`/etc/telegraf/monitoreo-ups.nuevo`), `.env` con `MONITOREO_UID`/`MONITOREO_GID`, primer deploy y comparación con la salida actual.
+  - [ ] VM: corte (intercambiar carpetas, copiar `errores.db`, cambiar el input de Telegraf), cron y logrotate.
+  - [ ] Comprobar que un cambio trivial en `main` se despliega solo.
+  - [ ] Probar un rollback.
 
   A partir de acá, cada MR mergeado llega solo a la VM.
 

@@ -1,18 +1,14 @@
 import json
 import logging
-import os
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from dotenv import load_dotenv
-
-import config.configuracion as c
-
 
 class Notificador:
-    def __init__(self, ruta_env: str) -> None:
-        load_dotenv(ruta_env)
-        self.url = os.getenv(c.VAR_PASSWORDCHAT)
+    def __init__(self, url: str | None, timeout: float) -> None:
+        """url: webhook de Google Chat (GOOGLE_CHAT_WEBHOOK_URL). timeout: segundos por envio."""
+        self.url = url
+        self.timeout = timeout
         self.logger = logging.getLogger(__name__)
 
     def enviar_mensajes(self, msg: str) -> bool:
@@ -22,11 +18,12 @@ class Notificador:
         Usa urllib de la libreria estandar: para un POST con JSON no hace falta otra dependencia.
         """
         if not self.url:
-            self.logger.error("URL de Google Chat no configurada (PASSWORDCHAT).")
+            self.logger.error("URL de Google Chat no configurada (GOOGLE_CHAT_WEBHOOK_URL)")
             return False
-        # urlopen tambien abre file:// y otros esquemas: solo se acepta el webhook por https
+        # urlopen tambien abre file:// y otros esquemas: solo se acepta el webhook por https.
+        # cargar_entorno ya lo valida; se repite aca por si el Notificador se crea de otra forma
         if not self.url.startswith("https://"):
-            self.logger.error("La URL de Google Chat (PASSWORDCHAT) debe empezar con https://")
+            self.logger.error("La URL de Google Chat debe empezar con https://")
             return False
 
         pedido = Request(  # noqa: S310 (esquema validado arriba)
@@ -38,7 +35,7 @@ class Notificador:
         try:
             # Sin timeout, un Google Chat que no responde dejaria el hilo esperando para siempre.
             # S310: el esquema ya se valido arriba (solo https)
-            with urlopen(pedido, timeout=c.HTTP_TIMEOUT):  # noqa: S310
+            with urlopen(pedido, timeout=self.timeout):  # noqa: S310
                 return True
         except HTTPError as e:
             # urlopen lanza HTTPError para las respuestas 4xx/5xx (por ejemplo 429 por limite)
