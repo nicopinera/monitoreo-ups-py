@@ -39,6 +39,16 @@ mypy:
   script:
     - uv run mypy
 
+# Lint de los scripts de deploy: corren en la VM con permisos de docker
+shellcheck:
+  stage: calidad
+  image:
+    name: koalaman/shellcheck-alpine:v0.10.0
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+  script:
+    - shellcheck deploy/*.sh
+
 pytest:
   extends: .uv
   stage: test
