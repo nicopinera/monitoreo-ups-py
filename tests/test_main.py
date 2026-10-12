@@ -7,7 +7,6 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from easysnmp import EasySNMPConnectionError
 
 import config.configuracion as c
 import config.entorno as entorno_mod
@@ -102,7 +101,7 @@ def test_las_tareas_corren_en_paralelo_y_respetan_el_orden() -> None:
 # ------------------------------------------------------------------ crear_tareas + ejecutar_tareas
 
 
-def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(
+def test_error_al_crear_el_cliente_solo_afecta_a_ese_host(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     notificador: NotificadorFalso,
@@ -120,9 +119,9 @@ def test_host_que_no_resuelve_dns_solo_afecta_a_ese_host(
     }
 
     def fabrica_clientes(hostname: str, ajustes: AjustesSNMP) -> ClienteSNMPFalso:
-        # Igual que easysnmp con un nombre que no resuelve DNS
+        # Un error al crear el cliente de un host solo afecta a ese host
         if hostname == host_roto:
-            raise EasySNMPConnectionError("couldn't create SNMP handle")
+            raise RuntimeError("no se pudo crear la sesion SNMP")
         return ClienteSNMPFalso(respuestas)
 
     monkeypatch.setattr(main, "ClienteSNMP", fabrica_clientes)

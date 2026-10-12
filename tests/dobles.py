@@ -15,7 +15,7 @@ from infraestructura.snmp_client import ClienteSNMP
 
 class ClienteSNMPFalso(ClienteSNMP):
     """
-    Cliente SNMP sin red: responde con valores crudos (strings, como easysnmp) desde un diccionario.
+    Cliente SNMP sin red: responde con valores crudos (strings, como ezsnmp) desde un diccionario.
     Un OID que no esta en el diccionario se comporta como timeout (None).
     Hereda obtener_valor_numerico para testear la conversion real.
     """
