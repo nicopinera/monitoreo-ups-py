@@ -1,4 +1,4 @@
-.PHONY: install run test lint format typecheck audit check docker-build docker-run
+.PHONY: install run test lint format typecheck audit check docker-build docker-run probar-tarjetas
 
 install:
 	uv sync
@@ -35,3 +35,7 @@ docker-build:   # imagen etiquetada con el commit y como :prod (la que usa compo
 
 docker-run:     # una ejecucion, igual que Telegraf (necesita MONITOREO_UID/GID en el .env)
 	docker compose run --rm -T monitoreo
+
+# ---------------------------------------------------------------- Google Chat
+probar-tarjetas:   # tarjetas de ejemplo a un webhook de PRUEBA: make probar-tarjetas WEBHOOK='https://...'
+	PYTHONPATH=src uv run python scripts/probar_tarjetas.py "$(WEBHOOK)"

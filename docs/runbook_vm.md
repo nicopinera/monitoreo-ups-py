@@ -658,7 +658,9 @@ cualquier otro cambio y el historial queda registrado.
 | Correr el monitoreo a mano              | `sudo -u telegraf docker compose -f /etc/telegraf/monitoreo-ups/compose.yaml run --rm -T monitoreo`                                  |
 | Cambiar webhook, comunidad, timeouts…   | `sudo nano /etc/telegraf/monitoreo-ups/.env` (aplica en la próxima ejecución, sin deploy)                                            |
 | Ver la versión en producción            | `sudo -u telegraf docker image inspect monitoreo-ups:prod --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'` |
-| Ver el estado de las alertas            | `sudo -u telegraf sqlite3 /etc/telegraf/monitoreo-ups/data/errores.db 'select * from errores'` (`sudo apt install sqlite3`)          |
+| Ver las alertas activas                 | `sudo -u telegraf sqlite3 /etc/telegraf/monitoreo-ups/data/errores-v2.db 'select * from incidentes where fin is null'` (`sudo apt install sqlite3`; fechas en UTC) |
+| Ver el historial de incidentes          | `sudo -u telegraf sqlite3 /etc/telegraf/monitoreo-ups/data/errores-v2.db 'select ups_host, tipo_error, inicio, fin from incidentes order by inicio desc limit 20'` |
+| Ver equipos sin respuesta aún sin avisar | `sudo -u telegraf sqlite3 /etc/telegraf/monitoreo-ups/data/errores-v2.db 'select * from fallas_consecutivas'` |
 | Ver si hay un fallo de deploy pendiente | `sudo -u telegraf cat /etc/telegraf/monitoreo-ups/data/deploy_fallido` (si no existe, no hay)                                        |
 
 ---
@@ -687,6 +689,9 @@ cualquier otro cambio y el historial queda registrado.
 ---
 
 ## Anexo A: migración desde la instalación actual
+
+> **Histórico:** la VM ya se migró (12/10/2026, actualizando el clon en el lugar). Desde M5 la base es
+> `data/errores-v2.db`; las menciones a `errores.db` de este anexo son de la instalación vieja.
 
 **Situación:** la VM ya tiene un clon en `/etc/telegraf/monitoreo-ups` que Telegraf ejecuta con
 `python3 src/main.py`, y ese clon tiene la base de alertas (`data/errores.db`).

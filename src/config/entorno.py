@@ -19,11 +19,13 @@ import config.configuracion as c
 
 # Nombres de las variables de entorno (documentadas en .env.example)
 VAR_WEBHOOK_URL = "GOOGLE_CHAT_WEBHOOK_URL"
+VAR_GRAFANA_URL = "GRAFANA_URL"
 VAR_SNMP_COMMUNITY = "SNMP_COMMUNITY"
 VAR_SNMP_TIMEOUT = "SNMP_TIMEOUT"
 VAR_SNMP_RETRIES = "SNMP_RETRIES"
 VAR_HTTP_TIMEOUT = "HTTP_TIMEOUT"
 VAR_MAX_WORKERS = "MAX_WORKERS"
+VAR_FALLAS_PARA_ALERTA = "SNMP_FALLAS_PARA_ALERTA"
 VAR_LOG_LEVEL = "LOG_LEVEL"
 VAR_DATA_DIR = "MONITOREO_DATA_DIR"
 
@@ -34,8 +36,15 @@ SNMP_TIMEOUT_DEFECTO = 1.0  # segundos por intento
 SNMP_RETRIES_DEFECTO = 1
 HTTP_TIMEOUT_DEFECTO = 10.0  # segundos maximos para enviar un mensaje a Google Chat
 MAX_WORKERS_DEFECTO = 13  # hilos en paralelo: casi todo el tiempo esperan la red
+# Ejecuciones seguidas sin respuesta SNMP antes de avisar: un paquete UDP perdido no es una alerta
+FALLAS_PARA_ALERTA_DEFECTO = 3
 LOG_LEVEL_DEFECTO = "INFO"
-DATA_DIR_DEFECTO = "data"  # base errores.db y carpeta logs/
+DATA_DIR_DEFECTO = "data"  # base de las alertas y carpeta logs/
+# v2: tabla de incidentes (M5). La base vieja (errores.db) ya no se usa y se puede borrar
+NOMBRE_ARCHIVO_DB = "errores-v2.db"
+
+# Destino del boton "Ver en Grafana" de las alertas: el dashboard general del datacenter
+GRAFANA_URL_DEFECTO = "https://grafana.srv.unc.edu.ar/d/26SryAYmz/datacenter"
 
 NIVELES_LOG = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
@@ -56,15 +65,17 @@ class AjustesSNMP:
 @dataclass(frozen=True)
 class Entorno:
     webhook_url: str | None  # None: las alertas quedan pendientes hasta configurarlo (A8)
+    grafana_url: str  # boton "Ver en Grafana" de las alertas
     snmp: AjustesSNMP
     http_timeout: float
     max_workers: int
+    fallas_para_alerta: int  # ejecuciones seguidas sin respuesta SNMP antes de avisar
     log_level: int
     data_dir: str  # ruta absoluta
 
     @property
     def archivo_db(self) -> str:
-        return os.path.join(self.data_dir, "errores.db")
+        return os.path.join(self.data_dir, NOMBRE_ARCHIVO_DB)
 
     @property
     def logs_dir(self) -> str:
@@ -123,6 +134,9 @@ def cargar_entorno(
     webhook_url = lector.texto(VAR_WEBHOOK_URL)
     if webhook_url is not None and not webhook_url.startswith("https://"):
         lector.errores.append(f"{VAR_WEBHOOK_URL}: tiene que empezar con https://")
+    grafana_url = lector.texto(VAR_GRAFANA_URL) or GRAFANA_URL_DEFECTO
+    if not grafana_url.startswith(("https://", "http://")):
+        lector.errores.append(f"{VAR_GRAFANA_URL}: tiene que empezar con https:// o http://")
 
     snmp = AjustesSNMP(
         community=lector.obligatorio(VAR_SNMP_COMMUNITY),
@@ -131,6 +145,7 @@ def cargar_entorno(
     )
     http_timeout = lector.numero(VAR_HTTP_TIMEOUT, float, HTTP_TIMEOUT_DEFECTO, 1.0)
     max_workers = lector.numero(VAR_MAX_WORKERS, int, MAX_WORKERS_DEFECTO, 1)
+    fallas_para_alerta = lector.numero(VAR_FALLAS_PARA_ALERTA, int, FALLAS_PARA_ALERTA_DEFECTO, 1)
 
     nombre_nivel = (lector.texto(VAR_LOG_LEVEL) or LOG_LEVEL_DEFECTO).upper()
     if nombre_nivel not in NIVELES_LOG:
@@ -149,9 +164,11 @@ def cargar_entorno(
 
     return Entorno(
         webhook_url=webhook_url,
+        grafana_url=grafana_url,
         snmp=snmp,
         http_timeout=http_timeout,
         max_workers=max_workers,
+        fallas_para_alerta=fallas_para_alerta,
         log_level=int(getattr(logging, nombre_nivel)),  # "INFO" -> logging.INFO
         data_dir=data_dir,
     )
