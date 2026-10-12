@@ -173,7 +173,7 @@ Telegraf corta el comando al llegar a su `timeout` (5 s por defecto en `inputs.e
 Lo que sí hay que resolver:
 
 - **Con Docker es crítico montar `data/` como volumen** (lo hace el `compose.yaml`, §5.4). Si no, cada ejecución arranca con una base vacía. Cada error activo se tomaría como nuevo **y se notificaría en cada ejecución**, llenando el chat.
-- **El `.env` no está en la imagen.** En el contenedor los secretos llegan como variables de entorno con `env_file` del `compose.yaml`. `load_dotenv` sigue sirviendo para correr local, y si el archivo no existe no hace nada. Usar el formato simple `CLAVE=valor`, sin espacios alrededor del `=` ni comentarios al final de la línea, que lo entienden igual `load_dotenv`, compose y `docker run --env-file`. El formato actual de [.env.example](../.env.example) (`PASSWORDCHAT= ""`) hay que corregirlo.
+- **El `.env` no está en la imagen.** En el contenedor los secretos llegan como variables de entorno con `env_file` del `compose.yaml`. `load_dotenv` sigue sirviendo para correr local, y si el archivo no existe no hace nada. Usar el formato simple `CLAVE=valor`, sin espacios alrededor del `=` ni comentarios al final de la línea, que lo entienden igual `load_dotenv`, compose y `docker run --env-file`. El `.env.example` ya tiene ese formato (paso 12).
 - **El SQL de creación vive en `data/`**, la misma carpeta que se monta como volumen. Dentro del contenedor se vería la copia del clon y no la de la imagen. Conviene moverlo junto al código (`src/infraestructura/schema.sql`) y leerlo relativo a `__file__`. Así `data/` sólo tiene archivos generados en ejecución.
 
 **Propuesta:**
@@ -188,6 +188,12 @@ LOGS_DIR = os.path.join(DATA_DIR, "logs")  # data/logs/ queda ignorado por el pa
 - En la VM sin Docker y en desarrollo no cambia nada: la base sigue en `data/errores.db`.
 - En el contenedor el código está en `/app/src`, así que `RUTA_RAIZ` es `/app` y la base queda en `/app/data`, que es donde se monta `data/` del clon (§5.4). `MONITOREO_DATA_DIR` sólo hace falta para usar otra base, por ejemplo en la prueba en paralelo del paso 13.
 - **Permisos:** el contenedor corre con el UID del dueño del clon (`user:` en el `compose.yaml`, §5.4). Así los archivos de `data/` tienen el mismo dueño dentro y fuera del contenedor, y no hace falta ningún `chown`.
+
+> **Estado: implementado** (pasos 7 y 12).
+>
+> - `MONITOREO_DATA_DIR` (por defecto `data`) define la carpeta de la base (`errores.db`) y de los logs (`logs/`). Una ruta relativa se toma desde la raíz del repo, no desde la carpeta donde se ejecuta el proceso. `MONITOREO_LOG_DIR` se eliminó.
+> - El `.env` se lee con `dotenv_values` al arrancar (sin modificar las variables del proceso); si una variable también está en el entorno, gana la del entorno. En Docker no hay `.env` en la imagen: las variables llegan por `env_file`.
+> - El SQL de creación vive en `src/infraestructura/schema.sql` (paso 7).
 
 #### A7. El CI no ejecuta realmente los tests
 
@@ -264,7 +270,7 @@ Nivel por defecto `WARNING`: en una ejecución normal no se escribe nada, y lo q
 >
 > - stderr muestra desde `WARNING`; el archivo, desde `LOG_LEVEL` (por defecto `INFO`).
 > - **Cambio posterior:** los logs van **sólo al archivo**, no se escribe nada por consola. stderr se usa únicamente como respaldo si no se puede abrir el archivo. Con un UPS caído, cada OID generaba un warning en la consola. Contra: cuando la ejecución falla, Telegraf ya no muestra el motivo en su log; hay que mirar `monitoreo.log`.
-> - La carpeta se puede cambiar con `MONITOREO_LOG_DIR`.
+> - La carpeta se puede cambiar con `MONITOREO_LOG_DIR`. **Cambio posterior (paso 12):** los logs van a `<MONITOREO_DATA_DIR>/logs/` y `MONITOREO_LOG_DIR` se eliminó.
 > - Si no se puede crear el archivo, se sigue sólo con stderr.
 >
 > Detalle en [docs/logger/Mejoras.md](logger/Mejoras.md). El `warnings.filterwarnings` se mantuvo, pero ahora se aplica al ejecutar y no al importar.
@@ -350,11 +356,20 @@ class BaseUPS(ABC):
 
 **Dónde:** [configuracion.py](../src/config/configuracion.py)
 
-- La comunidad SNMP (`COMMUNITY = "publicapc"`) está en el código y versionada en git. Es una credencial: debe ir a variables de entorno.
+- La comunidad SNMP (`COMMUNITY`) está en el código y versionada en git. Es una credencial: debe ir a variables de entorno.
 - La variable `PASSWORDCHAT` contiene una **URL de webhook**. Conviene renombrarla a `GOOGLE_CHAT_WEBHOOK_URL` y actualizar [.env.example](../.env.example).
 - Hay un comentario residual `# ,'f2r9u1'` ([configuracion.py:9](../src/config/configuracion.py#L9)) cuando `f2r9u1` ya está en la lista.
 - Los umbrales están documentados con valores distintos en distintos lugares: el README dice 27 °C y el código 28; el commit `480f293` dice 50 % y el código actual tiene 60. Conviene que haya **una sola fuente de verdad** (el código o un archivo de configuración) y que el README remita a ella.
 - Con Docker, cambiar un host o un umbral implica commit, build y deploy, algo aceptable gracias al cron (§6). Los **secretos** y los valores que dependen del entorno (timeouts, nivel de log) deben venir del `.env` del clon, que compose pasa al contenedor con `env_file`.
+
+> **Estado: implementado** (paso 12).
+>
+> - **Entorno** ([config/entorno.py](../src/config/entorno.py)): `SNMP_COMMUNITY` (obligatoria), `GOOGLE_CHAT_WEBHOOK_URL` (antes `PASSWORDCHAT`), `SNMP_TIMEOUT`, `SNMP_RETRIES`, `HTTP_TIMEOUT`, `MAX_WORKERS`, `LOG_LEVEL` y `MONITOREO_DATA_DIR`. Todas documentadas en [.env.example](../.env.example).
+> - **Código** ([config/configuracion.py](../src/config/configuracion.py)): hosts, OIDs, umbrales, `VERSION_SNMP` y `FP_OUT`.
+> - `cargar_entorno()` se ejecuta una sola vez al arrancar (antes de configurar el logging) y devuelve una dataclass inmutable `Entorno` que `main` pasa a cada componente. Ningún otro módulo lee variables de entorno.
+> - **Valores inválidos** (por ejemplo `SNMP_TIMEOUT=abc`, `MAX_WORKERS=0`, un webhook que no es `https://`) o la falta de `SNMP_COMMUNITY`: el monitoreo no arranca, sale con 1 y lista **todos** los problemas en stderr. Si falta el webhook, arranca igual y las alertas quedan pendientes (A8).
+> - La comunidad sigue en el historial de git: sacarla del código no la des-publica. Lo de fondo es **cambiar la comunidad en los UPS** y cargar la nueva sólo en el `.env`.
+> - Los umbrales del README siguen desactualizados; se corrige en B8.
 
 #### M8. `ThreadPoolExecutor` sin control de resultados
 
@@ -964,7 +979,7 @@ Cada paso es **un MR independiente**, en este orden. El orden sigue tres criteri
 | ✅ 9  | `ruff --fix` + `ruff format` (sólo formato)                             | S      | 8          |
 | ✅ 10 | A7 — CI nuevo (ruff, pytest + cobertura, pip-audit; mypy no bloqueante) | M      | 9          |
 | ✅ 11 | B5 — Type hints, mypy `strict` y reglas completas de ruff               | M      | 10         |
-| 12    | A6 + M7 — Configuración y secretos por variables de entorno             | M      | 8          |
+| ✅ 12 | A6 + M7 — Configuración y secretos por variables de entorno             | M      | 8          |
 | 13    | Docker + `ezsnmp` y Python 3.12 (M9)                                    | M      | 12         |
 | 14    | Deploy automático (cron, Telegraf con `docker compose run`, corte)      | M      | 13         |
 | 15    | M5 — Modelo de la tabla de errores                                      | M      | 14         |
@@ -1010,7 +1025,9 @@ Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rá
 
 ### Etapa 3 — Despliegue automático
 
-- [ ] **12. A6 + M7:** base y logs en `data/` (`data/logs/`), `.env` en formato `CLAVE=valor`, comunidad SNMP, webhook (renombrado a `GOOGLE_CHAT_WEBHOOK_URL`), timeouts y nivel de log por variables de entorno.
+- [x] **12. A6 + M7:** base y logs en `data/` (`data/logs/`), `.env` en formato `CLAVE=valor`, comunidad SNMP, webhook (renombrado a `GOOGLE_CHAT_WEBHOOK_URL`), timeouts y nivel de log por variables de entorno.
+  - [ ] **Antes de desplegar**, en el `.env` de la VM: agregar `SNMP_COMMUNITY=<la comunidad actual>` (sin ella no arranca), renombrar `PASSWORDCHAT` → `GOOGLE_CHAT_WEBHOOK_URL`, sacar comillas y espacios. Probar a mano con `python3 src/main.py >/dev/null; echo $?` antes de que lo corra Telegraf.
+  - [ ] Después de desplegar: los logs nuevos van a `data/logs/`; mover o borrar la carpeta `logs/` vieja.
 - [ ] **13. Docker:**
   - `Dockerfile`, `.dockerignore` y `compose.yaml`.
   - Migrar a `ezsnmp` y Python 3.12 (M9): `snmp_client.py`, tests, `.python-version`, `requires-python`, `target-version` de ruff, `python_version` de mypy e imagen del CI.

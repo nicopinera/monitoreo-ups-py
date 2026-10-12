@@ -59,6 +59,7 @@ select = [
 ]
 ignore = [
     "PLR2004",  # magic values: los umbrales viven en config
+    "N818",     # excepciones terminadas en "Error": en espanol el nombre es ErrorConfiguracion
 ]
 
 [tool.ruff.lint.per-file-ignores]
