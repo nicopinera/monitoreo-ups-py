@@ -26,9 +26,18 @@ class Incidente:
     inicio: datetime
 
 
+# Formato de las fechas en la base: el de CURRENT_TIMESTAMP de SQLite, en UTC y sin zona
+FORMATO_FECHA = "%Y-%m-%d %H:%M:%S"
+
+
 def _fecha_utc(texto: str) -> datetime:
-    """CURRENT_TIMESTAMP de SQLite ('2026-10-12 20:15:01') es UTC sin zona: se la agrega."""
+    """'2026-10-12 20:15:01' de la base (UTC sin zona) -> datetime con zona UTC."""
     return datetime.fromisoformat(texto).replace(tzinfo=UTC)
+
+
+def _texto_utc(fecha: datetime) -> str:
+    """datetime (con zona) -> texto UTC de la base."""
+    return fecha.astimezone(UTC).strftime(FORMATO_FECHA)
 
 
 class RepositorioDB:
@@ -79,20 +88,22 @@ class RepositorioDB:
         id_, host, tipo, inicio = fila
         return Incidente(id=id_, ups_host=host, tipo_error=tipo, inicio=_fecha_utc(inicio))
 
-    def abrir_incidente(self, ups_host: str, tipo_error: str) -> None:
-        """Abre un incidente. Si ya hay uno abierto de ese error no hace nada."""
+    def abrir_incidente(self, ups_host: str, tipo_error: str, inicio: datetime) -> None:
+        """
+        Abre un incidente. Si ya hay uno abierto de ese error no hace nada.
+        inicio lo fija quien avisa: identifica al incidente y a su hilo en el chat.
+        """
         self._modificar(
-            "INSERT INTO incidentes (ups_host, tipo_error) VALUES (?, ?)"
+            "INSERT INTO incidentes (ups_host, tipo_error, inicio) VALUES (?, ?, ?)"
             " ON CONFLICT (ups_host, tipo_error) WHERE fin IS NULL DO NOTHING",
-            (ups_host, tipo_error),
+            (ups_host, tipo_error, _texto_utc(inicio)),
         )
 
-    def cerrar_incidente(self, ups_host: str, tipo_error: str) -> None:
+    def cerrar_incidente(self, ups_host: str, tipo_error: str, fin: datetime) -> None:
         """Cierra el incidente abierto de ese error. Si no hay ninguno no hace nada."""
         self._modificar(
-            "UPDATE incidentes SET fin=CURRENT_TIMESTAMP"
-            " WHERE ups_host=? AND tipo_error=? AND fin IS NULL",
-            (ups_host, tipo_error),
+            "UPDATE incidentes SET fin=? WHERE ups_host=? AND tipo_error=? AND fin IS NULL",
+            (_texto_utc(fin), ups_host, tipo_error),
         )
 
     # ------------------------------------------------------------------ fallas consecutivas
