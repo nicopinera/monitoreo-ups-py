@@ -2,9 +2,9 @@
 name = "monitoreo-ups"
 version = "2.0.0"
 description = "Monitoreo SNMP de UPS con salida line protocol para Telegraf y alertas a Google Chat."
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
-    "easysnmp>=0.2.6",
+    "ezsnmp>=2.4",
     "python-dotenv>=1.2.4",
 ]
 
@@ -23,6 +23,8 @@ package = false
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
+# Un warning (por ejemplo, una conexion sin cerrar) hace fallar el test en lugar de pasar inadvertido
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["src"]
@@ -37,7 +39,7 @@ exclude_also = [
 ]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py313"
 line-length = 100
 src = ["src", "."]
 
@@ -59,13 +61,14 @@ select = [
 ]
 ignore = [
     "PLR2004",  # magic values: los umbrales viven en config
+    "N818",     # excepciones terminadas en "Error": en espanol el nombre es ErrorConfiguracion
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]   # assert es la forma de verificar en pytest
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.13"
 files = ["src", "tests"]
 mypy_path = "src"
 explicit_package_bases = true   # src/ no tiene __init__.py
@@ -73,5 +76,5 @@ strict = true
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["easysnmp.*"]
-ignore_missing_imports = true   # easysnmp no trae tipos
+module = ["ezsnmp.*"]
+ignore_missing_imports = true   # ezsnmp no trae tipos (no tiene py.typed)

@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 import config.configuracion as c
+from config.entorno import AjustesSNMP, Entorno, ErrorConfiguracion, cargar_entorno
 from drivers.dc_ups import DataCenterUPS
 from drivers.hum_ups import HumedadUPS
 from drivers.state_ups import StateUPS
@@ -22,34 +23,38 @@ Tarea = tuple[str, Callable[[], list[str]]]
 ResultadoTarea = list[str] | None
 
 
-def _tarea_humedad() -> list[str]:
-    cliente = ClienteSNMP(c.HOST_NAME_HUMEDAD)
+def _tarea_humedad(ajustes_snmp: AjustesSNMP) -> list[str]:
+    cliente = ClienteSNMP(c.HOST_NAME_HUMEDAD, ajustes_snmp)
     return HumedadUPS(hostname=c.HOST_NAME_HUMEDAD, cliente_snmp=cliente).ejecutar(c.OID_HUMEDAD)
 
 
-def _tarea_dc() -> list[str]:
-    cliente = ClienteSNMP(c.HOST_NAME_DC)
+def _tarea_dc(ajustes_snmp: AjustesSNMP) -> list[str]:
+    cliente = ClienteSNMP(c.HOST_NAME_DC, ajustes_snmp)
     return DataCenterUPS(c.HOST_NAME_DC, cliente_snmp=cliente).ejecutar(c.OID_DC)
 
 
-def _tarea_state(host: str, notificador: Notificador, repo_db: RepositorioDB) -> list[str]:
-    cliente = ClienteSNMP(host)
+def _tarea_state(
+    host: str, ajustes_snmp: AjustesSNMP, notificador: Notificador, repo_db: RepositorioDB
+) -> list[str]:
+    cliente = ClienteSNMP(host, ajustes_snmp)
     driver = StateUPS(hostname=host, cliente_snmp=cliente, notificador=notificador, rep_db=repo_db)
     return driver.ejecutar(c.OID_UPS, c.OIDT, c.OIDTNEW)
 
 
-def crear_tareas(notificador: Notificador, repo_db: RepositorioDB) -> list[Tarea]:
+def crear_tareas(
+    ajustes_snmp: AjustesSNMP, notificador: Notificador, repo_db: RepositorioDB
+) -> list[Tarea]:
     """
     Arma las tareas a ejecutar como una lista de (nombre, funcion).
     Cada tarea crea su propio cliente SNMP, asi un host que falla al crear la sesion
     (por ejemplo un nombre que no resuelve DNS) solo afecta a ese host.
     """
     tareas: list[Tarea] = [
-        (f"humedad {c.HOST_NAME_HUMEDAD}", _tarea_humedad),
-        (f"DC {c.HOST_NAME_DC}", _tarea_dc),
+        (f"humedad {c.HOST_NAME_HUMEDAD}", partial(_tarea_humedad, ajustes_snmp)),
+        (f"DC {c.HOST_NAME_DC}", partial(_tarea_dc, ajustes_snmp)),
     ]
     tareas += [
-        (f"state {host}", partial(_tarea_state, host, notificador, repo_db))
+        (f"state {host}", partial(_tarea_state, host, ajustes_snmp, notificador, repo_db))
         for host in c.HOST_NAME_STATE
     ]
     return tareas
@@ -67,7 +72,7 @@ def _ejecutar_protegido(nombre: str, tarea: Callable[[], list[str]]) -> Resultad
         return None
 
 
-def ejecutar_tareas(tareas: list[Tarea], max_workers: int = c.MAX_WORKERS) -> list[ResultadoTarea]:
+def ejecutar_tareas(tareas: list[Tarea], max_workers: int) -> list[ResultadoTarea]:
     """
     Ejecuta todas las tareas en un pool de hilos (humedad y DC incluidos: asi sus timeouts no
     se suman al resto). Devuelve un resultado por tarea, en el orden de las tareas (no en el que
@@ -90,7 +95,7 @@ def escribir_lineas(lineas: list[str]) -> None:
         sys.stdout.flush()
 
 
-def main() -> int:
+def main(entorno: Entorno) -> int:
     """
     Devuelve el codigo de salida del proceso:
     - 0 si se obtuvo al menos una metrica. Telegraf descarta toda la salida si el codigo no es 0,
@@ -100,10 +105,11 @@ def main() -> int:
     logger.info("Iniciando monitoreo UPS")
 
     # Infraestructura compartida: si falla es un error fatal (configuracion local rota)
-    notificador = Notificador(c.ARCHIVO_ENV)
-    repo_db = RepositorioDB(c.ARCHIVO_DB)
+    notificador = Notificador(entorno.webhook_url, entorno.http_timeout)
+    repo_db = RepositorioDB(entorno.archivo_db)
 
-    resultados = ejecutar_tareas(crear_tareas(notificador, repo_db))
+    tareas = crear_tareas(entorno.snmp, notificador, repo_db)
+    resultados = ejecutar_tareas(tareas, entorno.max_workers)
 
     lineas = [linea for resultado in resultados if resultado for linea in resultado]
     escribir_lineas(lineas)
@@ -117,15 +123,30 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    # Se configura recien al ejecutar: asi importar main (por ejemplo en los tests)
-    # no tiene efectos secundarios
-    warnings.filterwarnings("ignore", category=UserWarning)
-    configurar_logger()
+def iniciar(ruta_env: str | None = c.ARCHIVO_ENV) -> int:
+    """
+    Punto de entrada del programa. Primero carga la configuracion del entorno, despues configura
+    el logging con ella y recien ahi ejecuta el monitoreo. Devuelve el codigo de salida.
+    """
     try:
-        codigo_salida = main()
+        entorno = cargar_entorno(ruta_env)
+    except ErrorConfiguracion as e:
+        # Todavia no hay logger (su carpeta y nivel vienen de la configuracion): va a stderr,
+        # que Telegraf muestra en su log cuando el comando termina con error
+        sys.stderr.write(f"Configuracion invalida (revisar el .env):\n{e}\n")
+        return 1
+
+    warnings.filterwarnings("ignore", category=UserWarning)
+    configurar_logger(entorno.logs_dir, entorno.log_level)
+    try:
+        return main(entorno)
     except Exception:
         # El traceback ya queda en el archivo de log, no hace falta relanzar la excepcion
         logger.exception("Error fatal en el flujo principal")
-        codigo_salida = 1
-    sys.exit(codigo_salida)
+        return 1
+
+
+if __name__ == "__main__":
+    # Se configura recien al ejecutar: asi importar main (por ejemplo en los tests)
+    # no tiene efectos secundarios
+    sys.exit(iniciar())

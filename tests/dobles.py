@@ -4,15 +4,18 @@ Viven aca y no en conftest.py porque conftest es para fixtures, no para importar
 Heredan de las clases reales para poder pasarlos donde el codigo espera esos tipos.
 """
 
+import logging
 from collections.abc import Mapping
+from typing import Any
 
+from config.entorno import AjustesSNMP, Entorno
 from infraestructura.notificador import Notificador
 from infraestructura.snmp_client import ClienteSNMP
 
 
 class ClienteSNMPFalso(ClienteSNMP):
     """
-    Cliente SNMP sin red: responde con valores crudos (strings, como easysnmp) desde un diccionario.
+    Cliente SNMP sin red: responde con valores crudos (strings, como ezsnmp) desde un diccionario.
     Un OID que no esta en el diccionario se comporta como timeout (None).
     Hereda obtener_valor_numerico para testear la conversion real.
     """
@@ -41,3 +44,17 @@ class NotificadorFalso(Notificador):
             return False
         self.mensajes.append(msg)
         return True
+
+
+def entorno_de_prueba(data_dir: str, **cambios: Any) -> Entorno:
+    """Entorno valido para tests, sin webhook real (nunca manda mensajes a Google Chat)."""
+    valores: dict[str, Any] = {
+        "webhook_url": None,
+        "snmp": AjustesSNMP(community="comunidad-de-prueba", timeout=1.0, retries=1),
+        "http_timeout": 10.0,
+        "max_workers": 4,
+        "log_level": logging.INFO,
+        "data_dir": data_dir,
+    }
+    valores.update(cambios)
+    return Entorno(**valores)

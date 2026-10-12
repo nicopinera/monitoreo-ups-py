@@ -8,7 +8,7 @@
 
 ## A dónde van los logs
 
-**Sólo al archivo `logs/monitoreo.log`** (rotativo), desde `INFO` (configurable). No se escribe nada por consola: ni en stdout (reservado para Telegraf) ni en stderr. Para seguir una ejecución: `tail -f logs/monitoreo.log`.
+**Sólo al archivo `data/logs/monitoreo.log`** (rotativo), desde `INFO` (configurable). No se escribe nada por consola: ni en stdout (reservado para Telegraf) ni en stderr. Para seguir una ejecución: `tail -f data/logs/monitoreo.log`.
 
 - **Rotación:** `monitoreo.log` rota a los 5 MB y se guardan 5 archivos viejos (`monitoreo.log.1` … `monitoreo.log.5`). Como máximo ocupa unos 30 MB.
 - **Formato:**
@@ -23,16 +23,16 @@
 
 ## Configuración
 
-Por variables de entorno del proceso. En Telegraf se definen con la opción `environment` de `[[inputs.exec]]`; con Docker, con `--env-file`.
+En el `.env` de la raíz del repo o como variables de entorno del proceso (ver [.env.example](../../.env.example) y `src/config/entorno.py`). La configuración se carga **antes** de configurar el logging, así que las dos se leen del `.env`.
 
 | Variable | Por defecto | Ejemplo |
 | --- | --- | --- |
-| `MONITOREO_LOG_DIR` | `logs/` en la raíz del repo | `/data/logs` |
+| `MONITOREO_DATA_DIR` | `data` (relativa a la raíz del repo) | `/app/data` |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `WARNING` |
 
-`LOG_LEVEL` controla qué llega al archivo. Un valor inválido se toma como `INFO`.
-
-> Estas variables **no** se leen del `.env` del repo, porque el `.env` se carga recién al crear el notificador, después de configurar el logging. Esto se unifica en el paso 12 del plan (configuración por variables de entorno).
+- Los logs van a `<MONITOREO_DATA_DIR>/logs/`, junto a la base: con Docker, un solo volumen cubre las dos cosas.
+- `LOG_LEVEL` controla qué llega al archivo. Un valor inválido hace que el monitoreo no arranque y explique el error en stderr.
+- Para depurar sin editar el `.env`: `LOG_LEVEL=DEBUG python src/main.py` (el entorno del proceso gana sobre el archivo).
 
 ## Cómo escribir logs en el código
 

@@ -42,7 +42,7 @@ humedad_ups/
 Define los parámetros SNMP necesarios:
 
 - `HOST_NAME`: Host del sensor de humedad (`f2r7u1.psi.unc.edu.ar`)
-- `COMMUNITY`: Comunidad SNMP para autenticación (`publicapc`)
+- `SNMP_COMMUNITY` (en el `.env`): Comunidad SNMP para autenticación
 - `ODIH2`: OID que identifica el sensor de humedad (`1.3.6.1.4.1.318.1.1.25.1.2.1.7.2.1`)
 
 #### **main.py** - Función principal
@@ -287,7 +287,7 @@ Cada función también genera un mensaje de alerta descriptivo con el valor actu
    - Función `borrar_si_vieja()` elimina la BD si tiene más de 10 minutos sin uso
    - Evita acumulación de archivos de BD innecesarios
 
-2. Carga variables de entorno usando `dotenv` (cargar `PASSWORDCHAT` con URL webhook)
+2. Carga la configuración del `.env` (ver `.env.example`), incluido `GOOGLE_CHAT_WEBHOOK_URL`
 
 3. Inicializa lista vacía `ups_list` para almacenar objetos UPS
 
@@ -317,6 +317,6 @@ python-dotenv  # Carga de variables de entorno
 
 ### Configuración requerida
 
-- Archivo `.env` en raíz del proyecto con: `PASSWORDCHAT=<URL_del_webhook>`
-- Acceso SNMP a los UPS (puerto 161, comunidad `publicapc`)
+- Archivo `.env` en raíz del proyecto, copiado de `.env.example`: `SNMP_COMMUNITY` y `GOOGLE_CHAT_WEBHOOK_URL`
+- Acceso SNMP a los UPS (puerto 161)
 - Conectividad de red a todos los equipos en dominio `psi.unc.edu.ar`

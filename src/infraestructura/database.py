@@ -2,6 +2,8 @@ import logging
 import os
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from typing import Any
 
 # El esquema vive junto al codigo y no en data/: data/ se monta como volumen en Docker
@@ -25,22 +27,28 @@ class RepositorioDB:
 
         # Creación inicial de tablas
         try:
-            with (
-                sqlite3.connect(self.db_file) as conn,
-                open(ARCHIVO_ESQUEMA, encoding="utf-8") as sql_script,
-            ):
-                conn.executescript(sql_script.read())
+            with self._conexion() as conn, open(ARCHIVO_ESQUEMA, encoding="utf-8") as esquema:
+                conn.executescript(esquema.read())
                 conn.commit()
         except sqlite3.Error:
             self.logger.exception("Error al ejecutar el script de creación de tablas")
 
+    @contextmanager
+    def _conexion(self) -> Iterator[sqlite3.Connection]:
+        """
+        Conexion que se cierra al salir. `with sqlite3.connect(...)` solo hace commit o rollback:
+        no cierra la conexion (Python 3.13 lo avisa con ResourceWarning).
+        """
+        with closing(sqlite3.connect(self.db_file)) as conn:
+            yield conn
+
     def _consultar_una(self, sql: str, parametros: tuple[str, ...]) -> Fila | None:
-        with self.lock, sqlite3.connect(self.db_file) as conn:
+        with self.lock, self._conexion() as conn:
             fila: Fila | None = conn.execute(sql, parametros).fetchone()
             return fila
 
     def _modificar(self, sql: str, parametros: tuple[str, ...]) -> None:
-        with self.lock, sqlite3.connect(self.db_file) as conn:
+        with self.lock, self._conexion() as conn:
             conn.execute(sql, parametros)
             conn.commit()
 
