@@ -144,6 +144,8 @@ def test_la_sesion_usa_timeout_y_reintentos_de_la_configuracion(
     assert parametros["timeout"] == 2.5
     assert parametros["retries"] == 3
     assert parametros["hostname"] == "ups-test" + c.SUFIJO
+    # Sin esto la autonomia de los APC (TimeTicks) llega como texto y se pierde
+    assert parametros["print_timeticks_numerically"] is True
 
 
 def test_host_que_no_resuelve_dns_corta_como_un_timeout(caplog: pytest.LogCaptureFixture) -> None:
