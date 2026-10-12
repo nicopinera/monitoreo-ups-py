@@ -1,7 +1,8 @@
-stages: [calidad,test,seguridad]
+stages: [calidad, test, seguridad, build]
 
 variables:
   UV_VERSION: "0.13.0"
+  PYTHON_IMAGE: "python:3.13-slim-trixie"   # la misma version que .python-version y el Dockerfile
   UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
   UV_LINK_MODE: copy
 
@@ -12,7 +13,7 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "schedule"
 
 .uv:
-  image: python:3.10-slim-bookworm
+  image: $PYTHON_IMAGE
   # El pipeline programado (semanal) solo corre pip-audit: busca CVEs nuevas sin cambios de codigo
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
@@ -51,10 +52,34 @@ pytest:
       coverage_report: { coverage_format: cobertura, path: coverage.xml }
 
 pip-audit:
-  image: python:3.10-slim-bookworm
+  image: $PYTHON_IMAGE
   stage: seguridad
   before_script:
     - pip install --quiet "uv==${UV_VERSION}"
   script:
     - uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
     - uvx pip-audit --strict --disable-pip --require-hashes -r requirements.txt
+
+# Verifica que el Dockerfile construye y que la imagen arranca. No publica nada (no hay registry):
+# la imagen productiva la construye la VM (paso 14 del plan).
+docker-build:
+  stage: build
+  image: docker:28
+  services: [docker:28-dind]
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+  script:
+    - docker build --build-arg GIT_SHA="$CI_COMMIT_SHORT_SHA" -t monitoreo-ups:ci .
+    # Las dependencias cargan (ezsnmp incluye su libreria de net-snmp)
+    - docker run --rm --network none --entrypoint python monitoreo-ups:ci -c "import main"
+    # Sin configuracion el programa arranca, la valida y sale con 1 explicando el problema
+    - |
+      set +e
+      docker run --rm --network none monitoreo-ups:ci 2> stderr.txt
+      codigo=$?
+      set -e
+      cat stderr.txt
+      test "$codigo" -eq 1
+      grep -q "SNMP_COMMUNITY: falta y es obligatoria" stderr.txt
