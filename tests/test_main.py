@@ -142,10 +142,10 @@ def test_error_al_crear_el_cliente_solo_afecta_a_ese_host(
 
 
 def preparar_main(monkeypatch: pytest.MonkeyPatch, tareas: list[main.Tarea]) -> None:
-    """main con tareas falsas, sin tocar el chat ni data/errores.db."""
+    """main con tareas falsas, sin tocar el chat ni la base de data/."""
     monkeypatch.setattr(main, "Notificador", lambda url, timeout: NotificadorFalso())
     monkeypatch.setattr(main, "RepositorioDB", lambda ruta_db: None)
-    monkeypatch.setattr(main, "crear_tareas", lambda ajustes, notificador, repo_db: tareas)
+    monkeypatch.setattr(main, "crear_tareas", lambda ajustes, notificador, repo_db, fallas: tareas)
 
 
 @pytest.mark.parametrize(

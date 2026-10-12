@@ -7,7 +7,7 @@ import pytest
 import config.configuracion as c
 from core.errores import Errores
 from drivers.state_ups import StateUPS
-from infraestructura.database import Fila, RepositorioDB
+from infraestructura.database import Incidente, RepositorioDB
 from infraestructura.snmp_client import Numero
 from tests.dobles import ClienteSNMPFalso, NotificadorFalso
 
@@ -64,13 +64,13 @@ def test_campos_sin_dato_se_omiten(notificador: NotificadorFalso, repo_db: Repos
 def test_metrica_sin_dato_no_resuelve_su_error_activo(
     notificador: NotificadorFalso, repo_db: RepositorioDB
 ) -> None:
-    repo_db.agregar_error(HOST, Errores.CARGA_MINIMA.name)
+    repo_db.abrir_incidente(HOST, Errores.CARGA_MINIMA.name)
     respuestas = dict(RESPUESTAS_OK)
     del respuestas[c.OIDCAPACITY]
 
     ejecutar(respuestas, notificador, repo_db)
 
-    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is not None
+    assert repo_db.incidente_abierto(HOST, Errores.CARGA_MINIMA.name) is not None
     assert notificador.mensajes == []
 
 
@@ -118,17 +118,17 @@ def test_sin_respuesta_se_resuelve_cuando_vuelve(
 
     assert len(notificador.mensajes) == 2
     assert f"[RESUELTO] {Errores.SIN_RESPUESTA_SNMP.name}" in notificador.mensajes[1]
-    assert repo_db.error_activo(HOST, Errores.SIN_RESPUESTA_SNMP.name) is None
+    assert repo_db.incidente_abierto(HOST, Errores.SIN_RESPUESTA_SNMP.name) is None
 
 
 def test_sin_respuesta_no_resuelve_otros_errores_activos(
     notificador: NotificadorFalso, repo_db: RepositorioDB
 ) -> None:
-    repo_db.agregar_error(HOST, Errores.TEMPERATURA_BATERIA_ALTA.name)
+    repo_db.abrir_incidente(HOST, Errores.TEMPERATURA_BATERIA_ALTA.name)
 
     ejecutar({}, notificador, repo_db)
 
-    assert repo_db.error_activo(HOST, Errores.TEMPERATURA_BATERIA_ALTA.name) is not None
+    assert repo_db.incidente_abierto(HOST, Errores.TEMPERATURA_BATERIA_ALTA.name) is not None
     assert "RESUELTO" not in notificador.mensajes[0]
 
 
@@ -162,7 +162,10 @@ class RepositorioQueExplota(RepositorioDB):
         # No se llama al constructor real: no hace falta una base
         pass
 
-    def error_activo(self, ups_host: str, tipo_error: str) -> Fila | None:
+    def reiniciar_fallas(self, ups_host: str, tipo_error: str) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    def incidente_abierto(self, ups_host: str, tipo_error: str) -> Incidente | None:
         raise sqlite3.OperationalError("database is locked")
 
 
@@ -187,7 +190,7 @@ def test_si_falla_el_envio_no_se_guarda_el_error(
 
     ejecutar(respuestas, notificador, repo_db)
 
-    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is None
+    assert repo_db.incidente_abierto(HOST, Errores.CARGA_MINIMA.name) is None
     assert f"No se pudo notificar {HOST} (CARGA_MINIMA)" in caplog.text
 
 
@@ -203,7 +206,7 @@ def test_si_el_error_persiste_se_reenvia_y_recien_ahi_se_guarda(
 
     assert len(notificador.mensajes) == 1
     assert Errores.CARGA_MINIMA.name in notificador.mensajes[0]
-    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is not None
+    assert repo_db.incidente_abierto(HOST, Errores.CARGA_MINIMA.name) is not None
 
     ejecutar(respuestas, notificador, repo_db)  # ya avisado: no se repite
     assert len(notificador.mensajes) == 1
@@ -218,21 +221,21 @@ def test_si_el_error_se_resuelve_antes_del_reintento_no_se_envia_nada(
     ejecutar(RESPUESTAS_OK, notificador, repo_db)
 
     assert notificador.mensajes == []
-    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is None
+    assert repo_db.incidente_abierto(HOST, Errores.CARGA_MINIMA.name) is None
 
 
 def test_si_falla_el_envio_de_la_resolucion_el_error_sigue_activo(
     notificador: NotificadorFalso, repo_db: RepositorioDB
 ) -> None:
-    repo_db.agregar_error(HOST, Errores.CARGA_MINIMA.name)
+    repo_db.abrir_incidente(HOST, Errores.CARGA_MINIMA.name)
 
     notificador.falla = True
     ejecutar(RESPUESTAS_OK, notificador, repo_db)
-    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is not None
+    assert repo_db.incidente_abierto(HOST, Errores.CARGA_MINIMA.name) is not None
 
     notificador.falla = False
     ejecutar(RESPUESTAS_OK, notificador, repo_db)
-    assert repo_db.error_activo(HOST, Errores.CARGA_MINIMA.name) is None
+    assert repo_db.incidente_abierto(HOST, Errores.CARGA_MINIMA.name) is None
     assert f"[RESUELTO] {Errores.CARGA_MINIMA.name}" in notificador.mensajes[0]
 
 
@@ -244,16 +247,16 @@ def test_varias_alertas_salen_en_un_mensaje_y_se_guardan_todas_o_ninguna(
 
     notificador.falla = True
     ejecutar(respuestas, notificador, repo_db)
-    assert all(repo_db.error_activo(HOST, e) is None for e in errores)
+    assert all(repo_db.incidente_abierto(HOST, e) is None for e in errores)
 
     notificador.falla = False
     ejecutar(respuestas, notificador, repo_db)
     assert len(notificador.mensajes) == 1
     assert all(e in notificador.mensajes[0] for e in errores)
-    assert all(repo_db.error_activo(HOST, e) is not None for e in errores)
+    assert all(repo_db.incidente_abierto(HOST, e) is not None for e in errores)
 
 
-def test_error_resuelto_que_vuelve_reactiva_la_misma_fila(
+def test_error_resuelto_que_vuelve_abre_un_incidente_nuevo(
     notificador: NotificadorFalso, repo_db: RepositorioDB
 ) -> None:
     alto = dict(RESPUESTAS_OK, **{c.OIDCAPACITY: "50"})
@@ -262,11 +265,11 @@ def test_error_resuelto_que_vuelve_reactiva_la_misma_fila(
     ejecutar(alto, notificador, repo_db)
 
     with closing(sqlite3.connect(repo_db.db_file)) as conn:
-        filas = conn.execute(
-            "SELECT estado_error FROM errores WHERE ups_host=? AND tipo_error=?",
+        abiertos = conn.execute(
+            "SELECT fin IS NULL FROM incidentes WHERE ups_host=? AND tipo_error=? ORDER BY id",
             (HOST, Errores.CARGA_MINIMA.name),
         ).fetchall()
-    assert filas == [("activo",)]
+    assert abiertos == [(0,), (1,)]  # el primero cerrado (historial), el segundo abierto
     assert len(notificador.mensajes) == 3
 
 
@@ -274,3 +277,74 @@ def test_notificador_y_repositorio_son_obligatorios() -> None:
     with pytest.raises(TypeError):
         # mypy tambien lo detecta antes de ejecutar: por eso se ignora el error de tipos
         StateUPS(HOST, ClienteSNMPFalso({}))  # type: ignore[call-arg]
+
+
+# ------------------------------------------------------------------ fallas seguidas sin respuesta
+
+
+def ejecutar_con_umbral(
+    respuestas: Respuestas, notificador: NotificadorFalso, repo_db: RepositorioDB, umbral: int
+) -> list[str]:
+    driver = StateUPS(
+        HOST,
+        ClienteSNMPFalso(respuestas),
+        notificador=notificador,
+        rep_db=repo_db,
+        fallas_para_alerta=umbral,
+    )
+    return driver.ejecutar(c.OID_UPS, c.OIDT, c.OIDTNEW)
+
+
+def test_sin_respuesta_avisa_recien_despues_de_n_fallas_seguidas(
+    caplog: pytest.LogCaptureFixture, notificador: NotificadorFalso, repo_db: RepositorioDB
+) -> None:
+    caplog.set_level("INFO")
+    for _ in range(2):
+        ejecutar_con_umbral({}, notificador, repo_db, umbral=3)
+    assert notificador.mensajes == []
+    assert f"{HOST} sin respuesta SNMP (2 de 3 ejecuciones seguidas para avisar)" in caplog.text
+
+    ejecutar_con_umbral({}, notificador, repo_db, umbral=3)
+    assert len(notificador.mensajes) == 1
+    assert Errores.SIN_RESPUESTA_SNMP.name in notificador.mensajes[0]
+    assert "(3 ejecuciones seguidas)" in notificador.mensajes[0]
+
+    ejecutar_con_umbral({}, notificador, repo_db, umbral=3)  # ya avisado: no se repite
+    assert len(notificador.mensajes) == 1
+
+
+def test_una_respuesta_reinicia_la_cuenta_de_fallas(
+    notificador: NotificadorFalso, repo_db: RepositorioDB
+) -> None:
+    # Fallas sueltas (un paquete perdido de vez en cuando) nunca llegan al umbral
+    for respuestas in ({}, {}, RESPUESTAS_OK, {}, {}, RESPUESTAS_OK):
+        ejecutar_con_umbral(respuestas, notificador, repo_db, umbral=3)
+
+    assert notificador.mensajes == []
+    assert repo_db.incidente_abierto(HOST, Errores.SIN_RESPUESTA_SNMP.name) is None
+
+
+def test_sin_respuesta_avisado_se_resuelve_con_la_primera_respuesta(
+    notificador: NotificadorFalso, repo_db: RepositorioDB
+) -> None:
+    for _ in range(3):
+        ejecutar_con_umbral({}, notificador, repo_db, umbral=3)
+    ejecutar_con_umbral(RESPUESTAS_OK, notificador, repo_db, umbral=3)
+
+    assert len(notificador.mensajes) == 2
+    assert f"[RESUELTO] {Errores.SIN_RESPUESTA_SNMP.name}" in notificador.mensajes[1]
+
+
+def test_si_falla_el_aviso_de_sin_respuesta_se_reintenta_en_la_siguiente(
+    notificador: NotificadorFalso, repo_db: RepositorioDB
+) -> None:
+    # A8: llegado el umbral, si el envio falla se vuelve a intentar en la proxima ejecucion
+    notificador.falla = True
+    for _ in range(3):
+        ejecutar_con_umbral({}, notificador, repo_db, umbral=3)
+    assert repo_db.incidente_abierto(HOST, Errores.SIN_RESPUESTA_SNMP.name) is None
+
+    notificador.falla = False
+    ejecutar_con_umbral({}, notificador, repo_db, umbral=3)
+    assert len(notificador.mensajes) == 1
+    assert repo_db.incidente_abierto(HOST, Errores.SIN_RESPUESTA_SNMP.name) is not None

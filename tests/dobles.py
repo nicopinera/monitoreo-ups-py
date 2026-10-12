@@ -53,6 +53,7 @@ def entorno_de_prueba(data_dir: str, **cambios: Any) -> Entorno:
         "snmp": AjustesSNMP(community="comunidad-de-prueba", timeout=1.0, retries=1),
         "http_timeout": 10.0,
         "max_workers": 4,
+        "fallas_para_alerta": 1,
         "log_level": logging.INFO,
         "data_dir": data_dir,
     }

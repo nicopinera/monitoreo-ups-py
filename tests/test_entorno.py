@@ -24,9 +24,10 @@ def test_valores_por_defecto() -> None:
     assert entorno.snmp.retries == 1
     assert entorno.http_timeout == 10.0
     assert entorno.max_workers == 13
+    assert entorno.fallas_para_alerta == 3
     assert entorno.log_level == logging.INFO
     assert entorno.data_dir == os.path.join(c.RUTA_RAIZ, "data")
-    assert entorno.archivo_db == os.path.join(c.RUTA_RAIZ, "data", "errores.db")
+    assert entorno.archivo_db == os.path.join(c.RUTA_RAIZ, "data", "errores-v2.db")
     assert entorno.logs_dir == os.path.join(c.RUTA_RAIZ, "data", "logs")
 
 
@@ -40,6 +41,7 @@ def test_convierte_los_valores() -> None:
             "SNMP_RETRIES": "0",
             "HTTP_TIMEOUT": "5",
             "MAX_WORKERS": "26",
+            "SNMP_FALLAS_PARA_ALERTA": "1",
             "LOG_LEVEL": "debug",
         },
     )
@@ -49,6 +51,7 @@ def test_convierte_los_valores() -> None:
     assert entorno.snmp.retries == 0
     assert entorno.http_timeout == 5.0
     assert entorno.max_workers == 26
+    assert entorno.fallas_para_alerta == 1
     assert entorno.log_level == logging.DEBUG
 
 
@@ -69,6 +72,7 @@ def test_informa_todos_los_errores_juntos() -> None:
         "SNMP_TIMEOUT": "abc",
         "SNMP_RETRIES": "1.5",
         "MAX_WORKERS": "0",
+        "SNMP_FALLAS_PARA_ALERTA": "0",
         "LOG_LEVEL": "MUCHO",
         "GOOGLE_CHAT_WEBHOOK_URL": "http://chat.example/webhook",
     }
@@ -81,6 +85,7 @@ def test_informa_todos_los_errores_juntos() -> None:
     assert "SNMP_TIMEOUT='abc': tiene que ser un numero" in mensaje
     assert "SNMP_RETRIES='1.5': tiene que ser un entero" in mensaje
     assert "MAX_WORKERS='0': tiene que ser mayor o igual a 1" in mensaje
+    assert "SNMP_FALLAS_PARA_ALERTA='0': tiene que ser mayor o igual a 1" in mensaje
     assert "LOG_LEVEL='MUCHO'" in mensaje
     assert "GOOGLE_CHAT_WEBHOOK_URL: tiene que empezar con https://" in mensaje
 
