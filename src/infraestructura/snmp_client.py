@@ -1,7 +1,8 @@
 import logging
 import math
 
-from easysnmp import EasySNMPTimeoutError, Session
+from ezsnmp import Session
+from ezsnmp import exceptions as errores_snmp
 
 import config.configuracion as c
 from config.entorno import AjustesSNMP
@@ -9,12 +10,16 @@ from config.entorno import AjustesSNMP
 # Valor numerico de un OID; None si no hubo respuesta o no es un numero valido
 Numero = int | float
 
+# Tipos que devuelve ezsnmp (SNMPv2c) cuando el OID no existe en el equipo
+TIPOS_SIN_DATO = ("NOSUCHOBJECT", "NOSUCHINSTANCE", "ENDOFMIBVIEW")
+
 
 class ClienteSNMP:
     """
-    Cliente SNMP de un host. Se crea uno por host y por ejecucion.
-    Despues del primer timeout no se consultan mas OIDs de ese host en esta ejecucion:
-    si no respondio a uno, esperar el timeout de cada OID restante solo alarga la ejecucion.
+    Cliente SNMP de un host (con ezsnmp). Se crea uno por host y por ejecucion.
+    Si el host no responde (timeout) o no se puede contactar (por ejemplo, el nombre no resuelve
+    DNS), no se consultan mas OIDs de ese host en esta ejecucion: esperar cada OID restante solo
+    alargaria la ejecucion.
     """
 
     def __init__(self, hostname: str, ajustes: AjustesSNMP) -> None:
@@ -33,21 +38,29 @@ class ClienteSNMP:
         if self.sin_respuesta:
             return None
         try:
-            valor: str = self.session.get(oid).value
-            return valor
-        except EasySNMPTimeoutError:
+            resultado = self.session.get(oid)[0]  # ezsnmp devuelve una tupla de resultados
+        except (errores_snmp.TimeoutError, errores_snmp.ConnectionError) as e:
             self.sin_respuesta = True
             self.logger.warning(
-                "Timeout SNMP en %s (oid=%s), no se consultan mas OIDs de este host",
+                "Sin respuesta SNMP de %s (oid=%s): %s. No se consultan mas OIDs de este host",
                 self.fullhostname,
                 oid,
+                _primera_linea(e),
             )
             return None
         except Exception as e:
-            self.logger.error(
-                "Error al obtener valor SNMP de %s (oid=%s): %s", self.fullhostname, oid, e
-            )
+            if _es_oid_inexistente(e):
+                self.logger.debug("OID inexistente en %s (oid=%s)", self.fullhostname, oid)
+            else:
+                self.logger.error(
+                    "Error SNMP de %s (oid=%s): %s", self.fullhostname, oid, _primera_linea(e)
+                )
             return None
+
+        if resultado.type in TIPOS_SIN_DATO:
+            return None
+        valor: str = resultado.value
+        return valor
 
     def obtener_valor_numerico(self, oid: str) -> Numero | None:
         """
@@ -68,3 +81,24 @@ class ClienteSNMP:
             return None
         # nan / inf no son validos en line protocol
         return numero if math.isfinite(numero) else None
+
+
+def _primera_linea(error: Exception) -> str:
+    """Los mensajes de ezsnmp traen varias lineas y saltos de linea al final."""
+    return str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
+
+
+def _es_oid_inexistente(error: Exception) -> bool:
+    """
+    El equipo respondio, pero no tiene ese OID: es "sin dato", no un error (por ejemplo OIDT en
+    firmware nuevo, que usa OIDTNEW). Con SNMPv1, ezsnmp lo informa como PacketError
+    "(noSuchName)" (verificado contra el UPS del DC).
+    """
+    if isinstance(error, errores_snmp.PacketError):
+        return "noSuchName" in str(error)
+    return isinstance(
+        error,
+        errores_snmp.NoSuchObjectError
+        | errores_snmp.NoSuchInstanceError
+        | errores_snmp.NoSuchNameError,
+    )
