@@ -19,6 +19,7 @@ import config.configuracion as c
 
 # Nombres de las variables de entorno (documentadas en .env.example)
 VAR_WEBHOOK_URL = "GOOGLE_CHAT_WEBHOOK_URL"
+VAR_GRAFANA_URL = "GRAFANA_URL"
 VAR_SNMP_COMMUNITY = "SNMP_COMMUNITY"
 VAR_SNMP_TIMEOUT = "SNMP_TIMEOUT"
 VAR_SNMP_RETRIES = "SNMP_RETRIES"
@@ -42,6 +43,9 @@ DATA_DIR_DEFECTO = "data"  # base de las alertas y carpeta logs/
 # v2: tabla de incidentes (M5). La base vieja (errores.db) ya no se usa y se puede borrar
 NOMBRE_ARCHIVO_DB = "errores-v2.db"
 
+# Destino del boton "Ver en Grafana" de las alertas: el dashboard general del datacenter
+GRAFANA_URL_DEFECTO = "https://grafana.srv.unc.edu.ar/d/26SryAYmz/datacenter"
+
 NIVELES_LOG = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 N = TypeVar("N", int, float)
@@ -61,6 +65,7 @@ class AjustesSNMP:
 @dataclass(frozen=True)
 class Entorno:
     webhook_url: str | None  # None: las alertas quedan pendientes hasta configurarlo (A8)
+    grafana_url: str  # boton "Ver en Grafana" de las alertas
     snmp: AjustesSNMP
     http_timeout: float
     max_workers: int
@@ -129,6 +134,9 @@ def cargar_entorno(
     webhook_url = lector.texto(VAR_WEBHOOK_URL)
     if webhook_url is not None and not webhook_url.startswith("https://"):
         lector.errores.append(f"{VAR_WEBHOOK_URL}: tiene que empezar con https://")
+    grafana_url = lector.texto(VAR_GRAFANA_URL) or GRAFANA_URL_DEFECTO
+    if not grafana_url.startswith(("https://", "http://")):
+        lector.errores.append(f"{VAR_GRAFANA_URL}: tiene que empezar con https:// o http://")
 
     snmp = AjustesSNMP(
         community=lector.obligatorio(VAR_SNMP_COMMUNITY),
@@ -156,6 +164,7 @@ def cargar_entorno(
 
     return Entorno(
         webhook_url=webhook_url,
+        grafana_url=grafana_url,
         snmp=snmp,
         http_timeout=http_timeout,
         max_workers=max_workers,
