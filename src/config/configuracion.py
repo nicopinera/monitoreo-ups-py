@@ -1,18 +1,12 @@
+"""
+Configuracion que no depende del entorno: hosts, OIDs y umbrales. Se cambia por MR.
+Los secretos, rutas, timeouts y nivel de log vienen del entorno (ver config/entorno.py).
+"""
+
 import os
 
-COMMUNITY = "publicapc"
+# Depende de como estan configurados los UPS, no de donde corre el monitoreo
 VERSION_SNMP = 1
-
-# Un OID sin respuesta cuesta SNMP_TIMEOUT * (1 + SNMP_RETRIES) segundos (hoy 2 s).
-# Ademas, despues del primer timeout no se consultan mas OIDs de ese host (ver ClienteSNMP).
-SNMP_TIMEOUT = 1  # segundos por intento
-SNMP_RETRIES = 1
-
-# Hilos para consultar los equipos en paralelo: casi todo el tiempo esperan la red
-MAX_WORKERS = 13
-
-# Segundos maximos para enviar un mensaje a Google Chat
-HTTP_TIMEOUT = 10
 
 HOST_NAME_SHORT_F1 = [
     "f1r2u1",
@@ -124,14 +118,9 @@ VALOR_AUTONOMIA_MIN = 9.0
 
 RUTA_RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 ARCHIVO_ENV = os.path.join(RUTA_RAIZ, ".env")
-ARCHIVO_DB = os.path.join(RUTA_RAIZ, "data", "errores.db")
-VAR_PASSWORDCHAT = "PASSWORDCHAT"
 
-# Logging: archivo rotativo en LOGS_DIR (se puede cambiar con MONITOREO_LOG_DIR).
+# Logging: archivo rotativo <MONITOREO_DATA_DIR>/logs/monitoreo.log (ver config/entorno.py).
 # stderr solo se usa si falla el archivo.
-LOGS_DIR = os.path.join(RUTA_RAIZ, "logs")
 NOMBRE_ARCHIVO_LOG = "monitoreo.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB por archivo
 LOG_CANTIDAD_BACKUPS = 5  # monitoreo.log.1 ... monitoreo.log.5
-VAR_LOG_DIR = "MONITOREO_LOG_DIR"
-VAR_LOG_LEVEL = "LOG_LEVEL"
