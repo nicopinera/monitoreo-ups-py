@@ -1,5 +1,6 @@
 import logging
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -12,6 +13,9 @@ import config.configuracion as c
 import config.entorno as entorno_mod
 import main
 from config.entorno import AjustesSNMP, Entorno
+from core.alertas import Datos
+from core.gestor_alertas import GestorAlertas
+from core.ups_base import BaseUPS
 from infraestructura.database import RepositorioDB
 from tests.dobles import ClienteSNMPFalso, NotificadorFalso, entorno_de_prueba
 
@@ -127,7 +131,8 @@ def test_error_al_crear_el_cliente_solo_afecta_a_ese_host(
     monkeypatch.setattr(main, "ClienteSNMP", fabrica_clientes)
 
     ajustes = AjustesSNMP(community="x", timeout=1.0, retries=1)
-    resultados = main.ejecutar_tareas(main.crear_tareas(ajustes, notificador, repo_db), 4)
+    gestor = GestorAlertas(repo_db, notificador)
+    resultados = main.ejecutar_tareas(main.crear_tareas(ajustes, gestor), 4)
 
     lineas = [linea for resultado in resultados if resultado for linea in resultado]
     lineas_state = [linea for linea in lineas if "battery=" in linea]
@@ -136,6 +141,37 @@ def test_error_al_crear_el_cliente_solo_afecta_a_ese_host(
     assert f"ups_temp2,host={c.HOST_NAME_HUMEDAD} humidity=45" in lineas
     assert resultados.count(None) == 1
     assert f"Error al ejecutar state {host_roto}" in caplog.text
+    # El DC no respondio (no esta en las respuestas): con umbral 1 se avisa SIN_RESPUESTA_SNMP
+    assert [(e.equipo.hostname, e.error.name) for e in notificador.eventos] == [
+        (c.HOST_NAME_DC, "SIN_RESPUESTA_SNMP")
+    ]
+
+
+def test_si_fallan_las_alertas_las_metricas_se_devuelven_igual(
+    caplog: pytest.LogCaptureFixture, notificador: NotificadorFalso
+) -> None:
+    class RepositorioQueExplota(RepositorioDB):
+        def __init__(self) -> None:
+            pass  # No se llama al constructor real: no hace falta una base
+
+        def reiniciar_fallas(self, ups_host: str, tipo_error: str) -> None:
+            raise sqlite3.OperationalError("database is locked")
+
+    class DriverFijo(BaseUPS):
+        def obtener_datos(self) -> Datos:
+            return {"x": 1}
+
+        def lineas_telegraf(self, datos: Datos) -> list[str]:
+            return ["medida,host=h x=1"]
+
+    def crear_driver() -> BaseUPS:
+        return DriverFijo("h", ClienteSNMPFalso(), {})
+
+    gestor = GestorAlertas(RepositorioQueExplota(), notificador)
+
+    assert main._monitorear(crear_driver, gestor) == ["medida,host=h x=1"]
+    assert "Error al validar o notificar h" in caplog.text
+    assert "database is locked" in caplog.text  # el traceback queda en el log
 
 
 # ------------------------------------------------------------------ codigo de salida de main
@@ -143,9 +179,9 @@ def test_error_al_crear_el_cliente_solo_afecta_a_ese_host(
 
 def preparar_main(monkeypatch: pytest.MonkeyPatch, tareas: list[main.Tarea]) -> None:
     """main con tareas falsas, sin tocar el chat ni la base de data/."""
-    monkeypatch.setattr(main, "Notificador", lambda url, timeout: NotificadorFalso())
+    monkeypatch.setattr(main, "Notificador", lambda url, timeout, grafana: NotificadorFalso())
     monkeypatch.setattr(main, "RepositorioDB", lambda ruta_db: None)
-    monkeypatch.setattr(main, "crear_tareas", lambda ajustes, notificador, repo_db, fallas: tareas)
+    monkeypatch.setattr(main, "crear_tareas", lambda ajustes, gestor: tareas)
 
 
 @pytest.mark.parametrize(

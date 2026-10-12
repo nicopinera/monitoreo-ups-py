@@ -19,6 +19,7 @@ def test_valores_por_defecto() -> None:
     entorno = cargar_entorno(None, MINIMO)
 
     assert entorno.webhook_url is None
+    assert entorno.grafana_url == "https://grafana.srv.unc.edu.ar/d/26SryAYmz/datacenter"
     assert entorno.snmp.community == "comunidad"
     assert entorno.snmp.timeout == 1.0
     assert entorno.snmp.retries == 1
@@ -37,6 +38,7 @@ def test_convierte_los_valores() -> None:
         {
             **MINIMO,
             "GOOGLE_CHAT_WEBHOOK_URL": "https://chat.example/webhook",
+            "GRAFANA_URL": "http://grafana.local/d/x",
             "SNMP_TIMEOUT": "2.5",
             "SNMP_RETRIES": "0",
             "HTTP_TIMEOUT": "5",
@@ -47,6 +49,7 @@ def test_convierte_los_valores() -> None:
     )
 
     assert entorno.webhook_url == "https://chat.example/webhook"
+    assert entorno.grafana_url == "http://grafana.local/d/x"
     assert entorno.snmp.timeout == 2.5
     assert entorno.snmp.retries == 0
     assert entorno.http_timeout == 5.0
@@ -72,6 +75,7 @@ def test_informa_todos_los_errores_juntos() -> None:
         "SNMP_TIMEOUT": "abc",
         "SNMP_RETRIES": "1.5",
         "MAX_WORKERS": "0",
+        "GRAFANA_URL": "grafana.local",
         "SNMP_FALLAS_PARA_ALERTA": "0",
         "LOG_LEVEL": "MUCHO",
         "GOOGLE_CHAT_WEBHOOK_URL": "http://chat.example/webhook",
@@ -85,6 +89,7 @@ def test_informa_todos_los_errores_juntos() -> None:
     assert "SNMP_TIMEOUT='abc': tiene que ser un numero" in mensaje
     assert "SNMP_RETRIES='1.5': tiene que ser un entero" in mensaje
     assert "MAX_WORKERS='0': tiene que ser mayor o igual a 1" in mensaje
+    assert "GRAFANA_URL: tiene que empezar con https:// o http://" in mensaje
     assert "SNMP_FALLAS_PARA_ALERTA='0': tiene que ser mayor o igual a 1" in mensaje
     assert "LOG_LEVEL='MUCHO'" in mensaje
     assert "GOOGLE_CHAT_WEBHOOK_URL: tiene que empezar con https://" in mensaje

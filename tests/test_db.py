@@ -1,6 +1,6 @@
 import sqlite3
 from contextlib import closing
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -9,6 +9,8 @@ from infraestructura.database import RepositorioDB
 
 HOST = "ups-test"
 ERROR = "CARGA_MINIMA"
+INICIO = datetime(2026, 10, 12, 20, 21, 5, tzinfo=UTC)
+FIN = INICIO + timedelta(hours=2)
 
 
 def filas(repo: RepositorioDB, sql: str) -> list[tuple[object, ...]]:
@@ -23,7 +25,7 @@ def test_crea_las_tablas(repo_db: RepositorioDB) -> None:
 
 def test_crear_el_repositorio_dos_veces_no_falla(repo_db: RepositorioDB) -> None:
     # El esquema se ejecuta en cada arranque sobre la misma base
-    repo_db.abrir_incidente(HOST, ERROR)
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
     otro = RepositorioDB(repo_db.db_file)
     assert otro.incidente_abierto(HOST, ERROR) is not None
 
@@ -33,7 +35,7 @@ def test_crea_la_carpeta_de_la_base_si_no_existe(tmp_path: Path) -> None:
     db_file = tmp_path / "data" / "errores-v2.db"
 
     repo = RepositorioDB(str(db_file))
-    repo.abrir_incidente(HOST, ERROR)
+    repo.abrir_incidente(HOST, ERROR, INICIO)
 
     assert db_file.exists()
     assert repo.incidente_abierto(HOST, ERROR) is not None
@@ -46,51 +48,55 @@ def test_sin_incidentes_no_hay_ninguno_abierto(repo_db: RepositorioDB) -> None:
     assert repo_db.incidente_abierto(HOST, ERROR) is None
 
 
-def test_abrir_incidente(repo_db: RepositorioDB) -> None:
-    repo_db.abrir_incidente(HOST, ERROR)
+def test_abrir_incidente_guarda_el_inicio_en_utc(repo_db: RepositorioDB) -> None:
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
 
     incidente = repo_db.incidente_abierto(HOST, ERROR)
     assert incidente is not None
     assert (incidente.ups_host, incidente.tipo_error) == (HOST, ERROR)
-    # inicio en UTC, con zona, y de recien
-    assert incidente.inicio.tzinfo == UTC
-    assert datetime.now(UTC) - incidente.inicio < timedelta(minutes=1)
+    # El inicio vuelve igual, con zona UTC: identifica el hilo del incidente en el chat
+    assert incidente.inicio == INICIO
+    assert filas(repo_db, "SELECT inicio FROM incidentes") == [("2026-10-12 20:21:05",)]
+
+
+def test_una_fecha_con_otra_zona_se_guarda_en_utc(repo_db: RepositorioDB) -> None:
+    hora_local = INICIO.astimezone(timezone(timedelta(hours=-3)))
+    repo_db.abrir_incidente(HOST, ERROR, hora_local)
+    assert filas(repo_db, "SELECT inicio FROM incidentes") == [("2026-10-12 20:21:05",)]
 
 
 def test_abrir_dos_veces_no_duplica(repo_db: RepositorioDB) -> None:
-    repo_db.abrir_incidente(HOST, ERROR)
-    repo_db.abrir_incidente(HOST, ERROR)
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
 
     assert filas(repo_db, "SELECT COUNT(*) FROM incidentes") == [(1,)]
 
 
 def test_la_base_impide_dos_incidentes_abiertos_del_mismo_error(repo_db: RepositorioDB) -> None:
     # La regla la garantiza el indice unico parcial, no solo el codigo
-    repo_db.abrir_incidente(HOST, ERROR)
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
     with closing(sqlite3.connect(repo_db.db_file)) as conn, pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO incidentes (ups_host, tipo_error) VALUES (?, ?)", (HOST, ERROR))
 
 
 def test_cerrar_incidente_guarda_el_fin(repo_db: RepositorioDB) -> None:
-    repo_db.abrir_incidente(HOST, ERROR)
-    repo_db.cerrar_incidente(HOST, ERROR)
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+    repo_db.cerrar_incidente(HOST, ERROR, FIN)
 
     assert repo_db.incidente_abierto(HOST, ERROR) is None
-    [(inicio, fin)] = filas(repo_db, "SELECT inicio, fin FROM incidentes")
-    assert fin is not None
-    assert str(fin) >= str(inicio)
+    assert filas(repo_db, "SELECT fin FROM incidentes") == [("2026-10-12 22:21:05",)]
 
 
 def test_cerrar_sin_incidente_abierto_no_hace_nada(repo_db: RepositorioDB) -> None:
-    repo_db.cerrar_incidente(HOST, ERROR)
+    repo_db.cerrar_incidente(HOST, ERROR, FIN)
     assert filas(repo_db, "SELECT COUNT(*) FROM incidentes") == [(0,)]
 
 
 def test_cada_aparicion_es_un_incidente_nuevo(repo_db: RepositorioDB) -> None:
     # El historial queda: los cerrados no se reutilizan ni se pisan
-    repo_db.abrir_incidente(HOST, ERROR)
-    repo_db.cerrar_incidente(HOST, ERROR)
-    repo_db.abrir_incidente(HOST, ERROR)
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
+    repo_db.cerrar_incidente(HOST, ERROR, FIN)
+    repo_db.abrir_incidente(HOST, ERROR, INICIO)
 
     estados = filas(repo_db, "SELECT fin IS NULL FROM incidentes ORDER BY id")
     assert estados == [(0,), (1,)]  # el primero cerrado, el segundo abierto
@@ -99,11 +105,11 @@ def test_cada_aparicion_es_un_incidente_nuevo(repo_db: RepositorioDB) -> None:
 def test_incidentes_de_distintos_equipos_y_errores_son_independientes(
     repo_db: RepositorioDB,
 ) -> None:
-    repo_db.abrir_incidente("UPS-A", ERROR)
-    repo_db.abrir_incidente("UPS-B", ERROR)
-    repo_db.abrir_incidente("UPS-A", "LOAD_MAXIMO")
+    repo_db.abrir_incidente("UPS-A", ERROR, INICIO)
+    repo_db.abrir_incidente("UPS-B", ERROR, INICIO)
+    repo_db.abrir_incidente("UPS-A", "LOAD_MAXIMO", INICIO)
 
-    repo_db.cerrar_incidente("UPS-A", ERROR)
+    repo_db.cerrar_incidente("UPS-A", ERROR, FIN)
 
     assert repo_db.incidente_abierto("UPS-A", ERROR) is None
     assert repo_db.incidente_abierto("UPS-B", ERROR) is not None
