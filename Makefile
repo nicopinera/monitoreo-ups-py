@@ -12,6 +12,7 @@ test:
 lint:
 	uv run ruff check .
 	uv run ruff format --check .
+	uvx --from shellcheck-py==0.10.0.1 shellcheck deploy/*.sh
 
 format:
 	uv run ruff check --fix .
