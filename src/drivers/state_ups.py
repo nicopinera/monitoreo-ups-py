@@ -21,7 +21,8 @@ from infraestructura.snmp_client import ClienteSNMP
 logger = logging.getLogger(__name__)
 
 # Cambio de estado de un error: (nombre del error, accion sobre la DB, mensaje para el chat)
-Accion = Literal["agregar", "activar", "resolver"]
+# abrir: el error aparecio (nuevo incidente). cerrar: se resolvio (termina el incidente).
+Accion = Literal["abrir", "cerrar"]
 Transicion = tuple[str, Accion, str]
 
 # Orden de los campos en la linea de telegraf
@@ -35,12 +36,17 @@ class StateUPS(BaseUPS):
         cliente_snmp: ClienteSNMP,
         notificador: Notificador,
         rep_db: RepositorioDB,
+        fallas_para_alerta: int = 1,
     ) -> None:
-        """notificador y rep_db son obligatorios: sin ellos no se pueden gestionar las alertas."""
+        """
+        notificador y rep_db son obligatorios: sin ellos no se pueden gestionar las alertas.
+        fallas_para_alerta: ejecuciones seguidas sin respuesta SNMP antes de avisar.
+        """
         super().__init__(hostname, cliente_snmp, notificador, rep_db)
         # Se redefinen sin None para que mypy sepa que siempre estan
         self.notificador: Notificador = notificador
         self.rep_db: RepositorioDB = rep_db
+        self.fallas_para_alerta = fallas_para_alerta
 
     def obtener_datos(self, oid_dicc: dict[str, str], oidtemp: str, oidtemp2: str) -> None:
         """Cada driver debe saber que OID pedir. Las metricas sin dato quedan en None."""
@@ -71,25 +77,19 @@ class StateUPS(BaseUPS):
         """
         Compara el estado del sensor con el guardado en la DB, sin escribir nada.
         Si cambio, agrega a `transiciones` una tupla (nombre_error, accion, mensaje):
-        - Hay error y no esta activo -> "activar" (si ya existia resuelto) o "agregar".
-        - No hay error y esta activo -> "resolver".
+        - Hay error y no tiene un incidente abierto -> "abrir".
+        - No hay error y tiene un incidente abierto -> "cerrar".
         La DB recien se actualiza en _confirmar_transiciones, si el mensaje se pudo enviar.
         """
-        error_db_activo = self.rep_db.error_activo(self.hostname, nombre_error_str)
+        abierto = self.rep_db.incidente_abierto(self.hostname, nombre_error_str) is not None
 
-        if hay_error and not error_db_activo:
-            # Si el error ya existio y se resolvio, se reactiva esa fila; si no, se crea
-            accion: Accion
-            if self.rep_db.error_resuelto(self.hostname, nombre_error_str):
-                accion = "activar"
-            else:
-                accion = "agregar"
-            transiciones.append((nombre_error_str, accion, f"❌ {msj_error}"))
-        elif not hay_error and error_db_activo:
+        if hay_error and not abierto:
+            transiciones.append((nombre_error_str, "abrir", f"❌ {msj_error}"))
+        elif not hay_error and abierto:
             transiciones.append(
                 (
                     nombre_error_str,
-                    "resolver",
+                    "cerrar",
                     f"✅ [RESUELTO] {nombre_error_str} volvió a la normalidad.",
                 )
             )
@@ -97,9 +97,8 @@ class StateUPS(BaseUPS):
     def _confirmar_transiciones(self, transiciones: list[Transicion]) -> None:
         """Guarda en la DB las transiciones ya notificadas."""
         acciones: dict[Accion, Callable[[str, str], None]] = {
-            "agregar": self.rep_db.agregar_error,
-            "activar": self.rep_db.activar_error,
-            "resolver": self.rep_db.resolver_error,
+            "abrir": self.rep_db.abrir_incidente,
+            "cerrar": self.rep_db.cerrar_incidente,
         }
         for nombre_error_str, accion, _mensaje in transiciones:
             acciones[accion](self.hostname, nombre_error_str)
@@ -121,6 +120,32 @@ class StateUPS(BaseUPS):
         err, msg = funcion_validacion(valor)
         self._detectar_transicion(err, msg, error.name, transiciones)
 
+    def _validar_respuesta_snmp(self, hay_datos: bool, transiciones: list[Transicion]) -> None:
+        """
+        SIN_RESPUESTA_SNMP se avisa recien despues de `fallas_para_alerta` ejecuciones seguidas
+        sin respuesta: un paquete UDP perdido o un equipo lento una vez no es una alerta. Se
+        resuelve con la primera respuesta. La cuenta se guarda en la DB entre ejecuciones.
+        """
+        nombre = Errores.SIN_RESPUESTA_SNMP.name
+        if hay_datos:
+            self.rep_db.reiniciar_fallas(self.hostname, nombre)
+            self._detectar_transicion(None, None, nombre, transiciones)
+            return
+
+        fallas = self.rep_db.sumar_falla(self.hostname, nombre)
+        if fallas < self.fallas_para_alerta:
+            logger.info(
+                "%s sin respuesta SNMP (%d de %d ejecuciones seguidas para avisar)",
+                self.hostname,
+                fallas,
+                self.fallas_para_alerta,
+            )
+            return
+        err, msg = validar_respuesta_snmp(hay_datos)
+        self._detectar_transicion(
+            err, f"{msg} ({fallas} ejecuciones seguidas)", nombre, transiciones
+        )
+
     def validar_datos_y_notificar(self) -> None:
         """
         Valida los datos, envia un solo mensaje con todas las transiciones del UPS y recien
@@ -131,8 +156,7 @@ class StateUPS(BaseUPS):
 
         # Respuesta SNMP: si el equipo no devolvio ningun dato no se valida nada mas
         hay_datos = self._hay_datos()
-        err, msg = validar_respuesta_snmp(hay_datos)
-        self._detectar_transicion(err, msg, Errores.SIN_RESPUESTA_SNMP.name, transiciones)
+        self._validar_respuesta_snmp(hay_datos, transiciones)
 
         if hay_datos:
             # Temperatura Baterías
