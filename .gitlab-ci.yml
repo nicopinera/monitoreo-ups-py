@@ -75,9 +75,15 @@ pip-audit:
 docker-build:
   stage: build
   image: docker:28
-  services: [docker:28-dind]
+  services:
+    - name: docker:28-dind
+      # Sin TLS: el runner compartido no comparte /certs/client entre el servicio y el job,
+      # asi que el cliente no tendria los certificados. La conexion es interna al job.
+      # Desde Docker 27 escuchar en TCP sin TLS hay que pedirlo explicitamente.
+      command: ["--tls=false"]
   variables:
-    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule"
   script:
