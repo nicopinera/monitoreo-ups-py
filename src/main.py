@@ -34,15 +34,28 @@ def _tarea_dc(ajustes_snmp: AjustesSNMP) -> list[str]:
 
 
 def _tarea_state(
-    host: str, ajustes_snmp: AjustesSNMP, notificador: Notificador, repo_db: RepositorioDB
+    host: str,
+    ajustes_snmp: AjustesSNMP,
+    notificador: Notificador,
+    repo_db: RepositorioDB,
+    fallas_para_alerta: int,
 ) -> list[str]:
     cliente = ClienteSNMP(host, ajustes_snmp)
-    driver = StateUPS(hostname=host, cliente_snmp=cliente, notificador=notificador, rep_db=repo_db)
+    driver = StateUPS(
+        hostname=host,
+        cliente_snmp=cliente,
+        notificador=notificador,
+        rep_db=repo_db,
+        fallas_para_alerta=fallas_para_alerta,
+    )
     return driver.ejecutar(c.OID_UPS, c.OIDT, c.OIDTNEW)
 
 
 def crear_tareas(
-    ajustes_snmp: AjustesSNMP, notificador: Notificador, repo_db: RepositorioDB
+    ajustes_snmp: AjustesSNMP,
+    notificador: Notificador,
+    repo_db: RepositorioDB,
+    fallas_para_alerta: int = 1,
 ) -> list[Tarea]:
     """
     Arma las tareas a ejecutar como una lista de (nombre, funcion).
@@ -54,7 +67,10 @@ def crear_tareas(
         (f"DC {c.HOST_NAME_DC}", partial(_tarea_dc, ajustes_snmp)),
     ]
     tareas += [
-        (f"state {host}", partial(_tarea_state, host, ajustes_snmp, notificador, repo_db))
+        (
+            f"state {host}",
+            partial(_tarea_state, host, ajustes_snmp, notificador, repo_db, fallas_para_alerta),
+        )
         for host in c.HOST_NAME_STATE
     ]
     return tareas
@@ -108,7 +124,7 @@ def main(entorno: Entorno) -> int:
     notificador = Notificador(entorno.webhook_url, entorno.http_timeout)
     repo_db = RepositorioDB(entorno.archivo_db)
 
-    tareas = crear_tareas(entorno.snmp, notificador, repo_db)
+    tareas = crear_tareas(entorno.snmp, notificador, repo_db, entorno.fallas_para_alerta)
     resultados = ejecutar_tareas(tareas, entorno.max_workers)
 
     lineas = [linea for resultado in resultados if resultado for linea in resultado]

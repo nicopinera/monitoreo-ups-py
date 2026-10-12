@@ -24,6 +24,7 @@ VAR_SNMP_TIMEOUT = "SNMP_TIMEOUT"
 VAR_SNMP_RETRIES = "SNMP_RETRIES"
 VAR_HTTP_TIMEOUT = "HTTP_TIMEOUT"
 VAR_MAX_WORKERS = "MAX_WORKERS"
+VAR_FALLAS_PARA_ALERTA = "SNMP_FALLAS_PARA_ALERTA"
 VAR_LOG_LEVEL = "LOG_LEVEL"
 VAR_DATA_DIR = "MONITOREO_DATA_DIR"
 
@@ -34,8 +35,12 @@ SNMP_TIMEOUT_DEFECTO = 1.0  # segundos por intento
 SNMP_RETRIES_DEFECTO = 1
 HTTP_TIMEOUT_DEFECTO = 10.0  # segundos maximos para enviar un mensaje a Google Chat
 MAX_WORKERS_DEFECTO = 13  # hilos en paralelo: casi todo el tiempo esperan la red
+# Ejecuciones seguidas sin respuesta SNMP antes de avisar: un paquete UDP perdido no es una alerta
+FALLAS_PARA_ALERTA_DEFECTO = 3
 LOG_LEVEL_DEFECTO = "INFO"
-DATA_DIR_DEFECTO = "data"  # base errores.db y carpeta logs/
+DATA_DIR_DEFECTO = "data"  # base de las alertas y carpeta logs/
+# v2: tabla de incidentes (M5). La base vieja (errores.db) ya no se usa y se puede borrar
+NOMBRE_ARCHIVO_DB = "errores-v2.db"
 
 NIVELES_LOG = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
@@ -59,12 +64,13 @@ class Entorno:
     snmp: AjustesSNMP
     http_timeout: float
     max_workers: int
+    fallas_para_alerta: int  # ejecuciones seguidas sin respuesta SNMP antes de avisar
     log_level: int
     data_dir: str  # ruta absoluta
 
     @property
     def archivo_db(self) -> str:
-        return os.path.join(self.data_dir, "errores.db")
+        return os.path.join(self.data_dir, NOMBRE_ARCHIVO_DB)
 
     @property
     def logs_dir(self) -> str:
@@ -131,6 +137,7 @@ def cargar_entorno(
     )
     http_timeout = lector.numero(VAR_HTTP_TIMEOUT, float, HTTP_TIMEOUT_DEFECTO, 1.0)
     max_workers = lector.numero(VAR_MAX_WORKERS, int, MAX_WORKERS_DEFECTO, 1)
+    fallas_para_alerta = lector.numero(VAR_FALLAS_PARA_ALERTA, int, FALLAS_PARA_ALERTA_DEFECTO, 1)
 
     nombre_nivel = (lector.texto(VAR_LOG_LEVEL) or LOG_LEVEL_DEFECTO).upper()
     if nombre_nivel not in NIVELES_LOG:
@@ -152,6 +159,7 @@ def cargar_entorno(
         snmp=snmp,
         http_timeout=http_timeout,
         max_workers=max_workers,
+        fallas_para_alerta=fallas_para_alerta,
         log_level=int(getattr(logging, nombre_nivel)),  # "INFO" -> logging.INFO
         data_dir=data_dir,
     )
