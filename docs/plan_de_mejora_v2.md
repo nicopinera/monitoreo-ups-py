@@ -901,6 +901,7 @@ Se despliegan con el método actual. Son cambios chicos, y conviene sacarlos rá
 
   Problemas encontrados en la puesta en marcha, ya corregidos:
   - **Autonomía de los APC sin dato:** su OID es TimeTicks y ezsnmp, a diferencia de easysnmp, los devuelve como texto (`(123400) 0:20:34.00`), así que no se podían convertir a número; tampoco se validaba la alerta `AUTONOMIA_MINIMO`. La sesión se crea con `print_timeticks_numerically=True`. La migración (M9) se había verificado sólo contra el UPS del DC, cuya autonomía es `INTEGER`.
+  - **Autonomía de algunos APC sin dato, al azar:** `print_timeticks_numerically` es una opción global de net-snmp que ezsnmp cambia en cada consulta; con varios hilos a veces el TimeTicks llegaba como texto igual (`(123400) 0:20:34.00`, ~15 % de las consultas en paralelo contra el DC). `obtener_valor_numerico` ahora entiende también ese formato (toma los ticks entre paréntesis).
   - **Aviso del deploy no enviado:** el `.env` de la VM tenía el webhook entre comillas; python-dotenv y compose las quitan, pero el script lo leía con `grep`/`cut`. Ahora el script también las quita.
 
   A partir de acá, cada MR mergeado llega solo a la VM.
