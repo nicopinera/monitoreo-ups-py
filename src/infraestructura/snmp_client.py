@@ -1,5 +1,6 @@
 import logging
 import math
+import re
 
 from ezsnmp import Session
 from ezsnmp import exceptions as errores_snmp
@@ -7,6 +8,9 @@ from ezsnmp import exceptions as errores_snmp
 import config.configuracion as c
 from config.entorno import AjustesSNMP
 from core.alertas import Numero  # valor de un OID; None si no hubo respuesta o no es numerico
+
+# TimeTicks en formato de texto: "(123400) 0:20:34.00". El numero entre parentesis son los ticks
+TIMETICKS_TEXTO = re.compile(r"^\((\d+)\)")
 
 # Tipos que devuelve ezsnmp (SNMPv2c) cuando el OID no existe en el equipo
 TIPOS_SIN_DATO = ("NOSUCHOBJECT", "NOSUCHINSTANCE", "ENDOFMIBVIEW")
@@ -29,8 +33,7 @@ class ClienteSNMP:
             timeout=ajustes.timeout,
             retries=ajustes.retries,
             # TimeTicks (la autonomia de los APC) como numero de centesimas de segundo, igual
-            # que easysnmp. Por defecto ezsnmp los da como texto ("0:20:34.00") y no se pueden
-            # convertir a numero: la metrica quedaba sin dato.
+            # que easysnmp. No alcanza solo con esto: ver obtener_valor_numerico.
             print_timeticks_numerically=True,
         )
         self.logger = logging.getLogger(__name__)
@@ -73,6 +76,13 @@ class ClienteSNMP:
         valor = self.obtener_valor(oid)
         if valor is None:
             return None
+        # TimeTicks como texto, pese a print_timeticks_numerically: es una opcion global de
+        # net-snmp y ezsnmp la cambia en cada consulta, asi que con varios hilos a veces llega
+        # "(123400) 0:20:34.00" (verificado contra el UPS del DC: ~15 % de las consultas en
+        # paralelo). Sin esto la autonomia de los APC faltaba al azar.
+        ticks = TIMETICKS_TEXTO.match(valor)
+        if ticks:
+            return int(ticks.group(1))
         try:
             return int(valor)
         except (TypeError, ValueError):

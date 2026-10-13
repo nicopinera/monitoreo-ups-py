@@ -24,6 +24,9 @@ OID = "1.2.3"
         ("", None),
         ("nan", None),
         ("inf", None),
+        # TimeTicks en formato texto (ezsnmp con varios hilos): los ticks entre parentesis
+        ("(150000) 0:25:00.00", 150000),
+        ("(12003185) 1 day, 9:20:31.85", 12003185),
     ],
 )
 def test_obtener_valor_numerico(crudo: str | None, esperado: float | None) -> None:
