@@ -96,13 +96,13 @@ def test_al_resolverse_cierra_con_el_inicio_del_incidente_y_el_valor_actual(
     g.procesar(lectura(load=75))
     inicio = reloj.ahora
     reloj.avanzar(135)
-    g.procesar(lectura(load=48))
+    g.procesar(lectura(load=38))
 
     cierre = notificador.eventos[1]
     assert (cierre.error, cierre.accion) == (Errores.LOAD_MAXIMO, "cerrar")
     assert (cierre.inicio, cierre.fin) == (inicio, reloj.ahora)  # duracion: 2 h 15 min
     assert cierre.chequeo is not None
-    assert cierre.chequeo.valor == 48
+    assert cierre.chequeo.valor == 38
     assert abierto(repo_db, Errores.LOAD_MAXIMO) is None
 
 

@@ -122,8 +122,8 @@ REGLAS_UPS = (
     Regla("temp", Errores.UIO_ROTO, "min", 0, "°C"),
     Regla("temp", Errores.UIO_TEMPERATURA_ALTA, "max", 28, "°C"),
     Regla("capacity", Errores.CARGA_MINIMA, "min", 70, "%"),
-    Regla("load", Errores.LOAD_MAXIMO, "max", 60, "%"),
-    Regla("life", Errores.AUTONOMIA_MINIMO, "min", 9, "min"),
+    Regla("load", Errores.LOAD_MAXIMO, "max", 45, "%"),
+    Regla("life", Errores.AUTONOMIA_MINIMO, "min", 10, "min"),
 )
 
 RUTA_RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
