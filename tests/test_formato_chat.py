@@ -87,7 +87,7 @@ def test_alerta_con_valor_umbral_y_boton_de_grafana() -> None:
     texto = widget(mensaje)
     assert texto["topLabel"] == "Carga de salida alta"
     assert "<b>63 %</b>" in texto["text"]
-    assert texto["text"].endswith("· máximo 60 %")
+    assert texto["text"].endswith("· máximo 45 %")
     assert texto["startIcon"] == {"materialIcon": {"name": "warning"}}
     assert botones(mensaje) == [
         {"text": "Ver en Grafana", "onClick": {"openLink": {"url": GRAFANA}}}
@@ -98,7 +98,7 @@ def test_umbral_minimo_y_decimales() -> None:
     autonomia = regla(Errores.AUTONOMIA_MINIMO)
     evento = Evento(UPS, autonomia.error, "abrir", INICIO, chequeo=Chequeo(autonomia, 7.5, True))
 
-    assert widget(armar_mensaje(evento))["text"].endswith("<b>7,5 min</b></font> · mínimo 9 min")
+    assert widget(armar_mensaje(evento))["text"].endswith("<b>7,5 min</b></font> · mínimo 10 min")
 
 
 def test_sensor_roto_no_muestra_umbral() -> None:
