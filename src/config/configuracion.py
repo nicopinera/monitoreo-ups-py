@@ -122,7 +122,7 @@ REGLAS_UPS = (
     Regla("temp", Errores.UIO_ROTO, "min", 0, "°C"),
     Regla("temp", Errores.UIO_TEMPERATURA_ALTA, "max", 28, "°C"),
     Regla("capacity", Errores.CARGA_MINIMA, "min", 70, "%"),
-    Regla("load", Errores.LOAD_MAXIMO, "max", 45, "%"),
+    Regla("load", Errores.LOAD_MAXIMO, "max", 48, "%"),
     Regla("life", Errores.AUTONOMIA_MINIMO, "min", 10, "min"),
 )
 
